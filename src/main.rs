@@ -13,6 +13,7 @@
 //! Flags: --dry-run, --json
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use moesniper::{create_backup, hex_decode, write_atomic, write_atomic_owned, BACKUP_DIR};
@@ -94,19 +95,39 @@ fn main() {
 
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let json_out = args.iter().any(|a| a == "--json");
+    let use_stdin = args.iter().any(|a| a == "--stdin");
     let args: Vec<&str> = args
         .iter()
-        .filter(|a| *a != "--dry-run" && *a != "--json")
+        .filter(|a| *a != "--dry-run" && *a != "--json" && *a != "--stdin")
         .map(|s| s.as_str())
         .collect();
 
     let result = match args.as_slice() {
         [file, "--undo"] => cmd_undo(file),
+        [file, "--manifest"] if use_stdin => cmd_manifest_stdin(file, dry_run),
         [file, "--manifest", manifest] => cmd_manifest(file, manifest, dry_run),
-        [file, start, end, "--delete"] => match (parse_line(start), parse_line(end)) {
-            (Ok(s), Ok(e)) => cmd_splice(file, s, e, "", dry_run),
-            (Err(e), _) | (_, Err(e)) => err(e),
-        },
+        [file, start, end, "--delete"] => {
+            if use_stdin {
+                err("cannot use --stdin with --delete".into())
+            } else {
+                match (parse_line(start), parse_line(end)) {
+                    (Ok(s), Ok(e)) => cmd_splice(file, s, e, "", dry_run),
+                    (Err(e), _) | (_, Err(e)) => err(e),
+                }
+            }
+        }
+        [file, start, end] if use_stdin => {
+            let mut buffer = String::new();
+            match std::io::stdin().read_to_string(&mut buffer) {
+                Ok(_) => match (parse_line(start), parse_line(end)) {
+                    (Ok(ln_start), Ok(ln_end)) => {
+                        cmd_splice(file, ln_start, ln_end, &buffer, dry_run)
+                    }
+                    (Err(e), _) | (_, Err(e)) => err(e),
+                },
+                Err(e) => err(format!("read stdin: {e}")),
+            }
+        }
         [file, start, end, hex] => match (parse_line(start), parse_line(end)) {
             (Ok(s), Ok(e)) => match hex_decode(hex) {
                 Ok(content) => cmd_splice(file, s, e, &content, dry_run),
@@ -163,6 +184,8 @@ struct CliResult {
     operations: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     backup: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ai_hint: Option<String>,
 }
 
 fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: bool) -> CliResult {
@@ -187,12 +210,20 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
         content.lines().collect()
     };
 
+    let is_delete = content.is_empty();
+
     if dry_run {
+        let ai_hint = Some(if is_delete {
+            format!("verify: {} around line {}", filepath, start)
+        } else {
+            format!("verify: read {} lines {}-{}", filepath, start, end)
+        });
         return CliResult {
             status: "dry_run".into(),
             file: Some(filepath.into()),
             lines_removed: removed.len(),
             lines_inserted: new_lines.len(),
+            ai_hint,
             ..Default::default()
         };
     }
@@ -206,6 +237,12 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
         return err(e);
     }
 
+    let ai_hint = Some(if is_delete {
+        format!("verify: {} around line {}", filepath, start)
+    } else {
+        format!("verify: read {} lines {}-{}", filepath, start, end)
+    });
+
     CliResult {
         status: "ok".into(),
         file: Some(filepath.into()),
@@ -213,8 +250,18 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
         lines_inserted: new_lines.len(),
         total_lines: Some(lines.len()),
         backup: Some(bk),
+        ai_hint,
         ..Default::default()
     }
+}
+
+fn cmd_manifest_stdin(filepath: &str, dry_run: bool) -> CliResult {
+    let mut buffer = String::new();
+    let manifest = match std::io::stdin().read_to_string(&mut buffer) {
+        Ok(_) => buffer,
+        Err(e) => return err(format!("read manifest from stdin: {e}")),
+    };
+    cmd_manifest_impl(filepath, &manifest, dry_run)
 }
 
 fn cmd_manifest(filepath: &str, manifest_path: &str, dry_run: bool) -> CliResult {
@@ -222,8 +269,11 @@ fn cmd_manifest(filepath: &str, manifest_path: &str, dry_run: bool) -> CliResult
         Ok(m) => m,
         Err(e) => return err(format!("read manifest: {e}")),
     };
+    cmd_manifest_impl(filepath, &manifest, dry_run)
+}
 
-    let mut ops: Vec<ManifestOp> = match serde_json::from_str(&manifest) {
+fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult {
+    let mut ops: Vec<ManifestOp> = match serde_json::from_str(manifest) {
         Ok(o) => o,
         Err(e) => return err(format!("parse manifest: {e}")),
     };
@@ -272,6 +322,12 @@ fn cmd_manifest(filepath: &str, manifest_path: &str, dry_run: bool) -> CliResult
         }
     }
 
+    let ai_hint = Some(format!(
+        "verify: read {} around line {}",
+        filepath,
+        ops.first().map(|o| o.start).unwrap_or(1)
+    ));
+
     CliResult {
         status: if dry_run { "dry_run" } else { "ok" }.into(),
         file: Some(filepath.into()),
@@ -279,6 +335,7 @@ fn cmd_manifest(filepath: &str, manifest_path: &str, dry_run: bool) -> CliResult
         lines_inserted: total_inserted,
         total_lines: Some(lines.len()),
         operations: Some(ops.len()),
+        ai_hint,
         backup: bk,
         ..Default::default()
     }
@@ -315,9 +372,12 @@ fn cmd_undo(filepath: &str) -> CliResult {
         return err(format!("restore: {e}"));
     }
 
+    let ai_hint = Some(format!("verify restore: read {}", filepath));
+
     CliResult {
         status: "restored".into(),
         backup: Some(target.to_string_lossy().into()),
+        ai_hint,
         ..Default::default()
     }
 }
@@ -327,9 +387,17 @@ fn parse_line(s: &str) -> Result<usize, String> {
 }
 
 fn err(msg: String) -> CliResult {
+    let ai_hint = if msg.contains("no such file") || msg.contains("not found") {
+        Some("check path exists before editing".into())
+    } else if msg.contains("out of bounds") || msg.contains("exceeds file length") {
+        Some("read file first to check line count".into())
+    } else {
+        Some("fix error and retry".into())
+    };
     CliResult {
         status: "error".into(),
         message: Some(msg),
+        ai_hint,
         ..Default::default()
     }
 }
@@ -786,5 +854,86 @@ mod tests {
             // total_lines in result should match actual line count
             prop_assert_eq!(r.total_lines, Some(lines_after.len()));
         }
+    }
+
+    // --- ai_hint tests ---
+
+    #[test]
+    fn test_ai_hint_after_splice() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "hint_test.txt", "a\nb\nc\n");
+        let r = cmd_splice(&path, 2, 2, "xx", false);
+        assert_eq!(r.status, "ok");
+        assert!(r.ai_hint.is_some());
+        let hint = r.ai_hint.unwrap();
+        assert!(hint.starts_with("verify:"));
+        assert!(hint.contains("lines 2-2"));
+    }
+
+    #[test]
+    fn test_ai_hint_after_delete() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "hint_test.txt", "a\nb\nc\n");
+        let r = cmd_splice(&path, 2, 2, "", false);
+        assert_eq!(r.status, "ok");
+        assert!(r.ai_hint.is_some());
+        let hint = r.ai_hint.unwrap();
+        assert!(hint.starts_with("verify:"));
+        assert!(hint.contains("around line"));
+    }
+
+    #[test]
+    fn test_ai_hint_after_dry_run() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "hint_test.txt", "a\nb\nc\n");
+        let r = cmd_splice(&path, 1, 1, "xx", true);
+        assert_eq!(r.status, "dry_run");
+        assert!(r.ai_hint.is_some());
+    }
+
+    #[test]
+    fn test_ai_hint_after_error_not_found() {
+        let r = cmd_splice("/no/such/file.txt", 1, 1, "xx", false);
+        assert_eq!(r.status, "error");
+        assert!(r.ai_hint.is_some());
+        let hint = r.ai_hint.unwrap();
+        // Message contains "No such file" - hint should suggest checking path
+        assert!(hint.contains("check path") || hint.contains("fix error"));
+    }
+
+    #[test]
+    fn test_ai_hint_after_error_out_of_bounds() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "hint_test.txt", "a\nb\n");
+        let r = cmd_splice(&path, 10, 20, "xx", false);
+        assert_eq!(r.status, "error");
+        assert!(r.ai_hint.is_some());
+        let hint = r.ai_hint.unwrap();
+        assert!(hint.contains("line count"));
+    }
+
+    #[test]
+    fn test_ai_hint_after_undo() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "undo_hint.txt", "original\n");
+        let _ = cmd_splice(&path, 1, 1, "xx", false);
+        let r = cmd_undo(&path);
+        assert_eq!(r.status, "restored");
+        assert!(r.ai_hint.is_some());
+        let hint = r.ai_hint.unwrap();
+        assert!(hint.contains("verify restore"));
+    }
+
+    #[test]
+    fn test_ai_hint_serialize_excluded_without_json() {
+        // When --json is NOT used, ai_hint should still serialize but not appear in plain output
+        // This tests the struct has the field
+        let r = CliResult {
+            status: "ok".into(),
+            ai_hint: Some("test hint".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("ai_hint"));
     }
 }

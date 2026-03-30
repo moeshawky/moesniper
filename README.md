@@ -30,7 +30,27 @@ sniper file.rs --undo
 |------|-------------|
 | `--dry-run` | Preview changes without writing |
 | `--json` | Output machine-readable JSON |
+| `--stdin` | Read replacement content from stdin (skip hex encoding) |
 | `--help` | Show full usage (including LLM agent guide) |
+
+### Heredoc Input (--stdin)
+
+For LLM agents, `--stdin` with heredoc avoids hex encoding entirely:
+
+```bash
+sniper file.rs 10 15 --stdin <<'SNIPER_EOF'
+fn hello() {
+    println!("$world {}", x);
+    let escaped = "quotes \"inside\" quotes";
+}
+SNIPER_EOF
+```
+
+Single-quoted heredoc (`'SNIPER_EOF'`) disables ALL shell interpolation — content arrives byte-for-byte. Works with `--manifest` too:
+
+```bash
+sniper file.rs --manifest --stdin < ops.json
+```
 
 ## LLM Agent Workflow
 
@@ -96,9 +116,12 @@ sniper --json file.rs 5 5 6869
   "lines_removed": 1,
   "lines_inserted": 1,
   "total_lines": 42,
-  "backup": ".sniper/file.rs.1712345678"
+  "backup": ".sniper/file.rs.1712345678",
+  "ai_hint": "verify: read file.rs lines 5-5"
 }
 ```
+
+The `ai_hint` field provides contextual guidance for the next step (e.g., `"verify:"`, `"check path"`, `"read file first"`). It helps LLM agents recover from errors or verify success.
 
 ## Backups
 
