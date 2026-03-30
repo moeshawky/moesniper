@@ -1,0 +1,7 @@
+target/
+AGENTS.md
+PROMPT.md
+.ix/
+.sniper/
+proptest-regressions/
+Cargo.lock

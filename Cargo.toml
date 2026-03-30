@@ -1,0 +1,25 @@
+[package]
+name = "moesniper"
+version = "0.1.1"
+edition = "2021"
+description = "Escape-proof precision file editor for LLM agents. Hex-encoded content, line-range splicing, atomic writes."
+license = "MIT"
+keywords = ["editor", "llm", "agent", "hex", "code"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "sniper"
+path = "src/main.rs"
+
+[lib]
+name = "moesniper"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+moeix = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+proptest = "1"
