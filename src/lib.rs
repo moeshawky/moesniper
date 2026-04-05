@@ -1,7 +1,10 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
+use std::thread;
+
+use llmosafe::llmosafe_sense_vitals;
 
 pub const BACKUP_DIR: &str = ".sniper";
 
@@ -72,8 +75,20 @@ pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
     f.write_all(b"\n")
         .map_err(|e| format!("write trailing newline: {e}"))?;
     drop(f);
-    fs::rename(&tmp, filepath).map_err(|e| format!("rename: {e}"))?;
-    Ok(())
+
+    let vitals = llmosafe_sense_vitals();
+    if vitals.iowait_percent > 15.0 {
+        thread::sleep(Duration::from_millis(250));
+    }
+
+    match fs::rename(&tmp, filepath) {
+        Ok(_) => Ok(()),
+        Err(e) if e.raw_os_error() == Some(-7) => {
+            eprintln!("CRITICAL: Immune Memory Triggered: Aborting Atomic Write.");
+            Err("BacktrackSignaled: Atomic write aborted".to_string())
+        }
+        Err(e) => Err(format!("rename: {e}")),
+    }
 }
 
 pub fn write_atomic_owned(filepath: &str, lines: &[String]) -> Result<(), String> {
@@ -90,6 +105,18 @@ pub fn write_atomic_owned(filepath: &str, lines: &[String]) -> Result<(), String
     f.write_all(b"\n")
         .map_err(|e| format!("write trailing newline: {e}"))?;
     drop(f);
-    fs::rename(&tmp, filepath).map_err(|e| format!("rename: {e}"))?;
-    Ok(())
+
+    let vitals = llmosafe_sense_vitals();
+    if vitals.iowait_percent > 15.0 {
+        thread::sleep(Duration::from_millis(250));
+    }
+
+    match fs::rename(&tmp, filepath) {
+        Ok(_) => Ok(()),
+        Err(e) if e.raw_os_error() == Some(-7) => {
+            eprintln!("CRITICAL: Immune Memory Triggered: Aborting Atomic Write.");
+            Err("BacktrackSignaled: Atomic write aborted".to_string())
+        }
+        Err(e) => Err(format!("rename: {e}")),
+    }
 }

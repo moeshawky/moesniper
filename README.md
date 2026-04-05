@@ -1,139 +1,28 @@
-# moesniper
+# moesniper 🎯
 
-Escape-proof precision file editor for LLM agents. All content is hex-encoded to guarantee zero shell corruption. Edits are applied via line-range splicing with atomic writes and automatic backups.
+> Escape-proof precision file editor for LLM agents offering hex-encoded content, line-range splicing, and atomic writes.
 
-## Install
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)]()
 
-```bash
-cargo install moesniper
-```
-
-## Usage
+## See It In Action
 
 ```bash
-# Replace lines 10-12 with hex-decoded content
-sniper file.rs 10 12 7573652070657473
-
-# Delete lines 5-8
-sniper file.rs 5 8 --delete
-
-# Batch operations from a manifest file
-sniper file.rs --manifest ops.json
-
-# Undo last edit (restores backup)
-sniper file.rs --undo
+# Splice lines 10-20 safely with LLMOSafe throttling
+sniper splice target.rs 10 20 "hex_encoded_content"
 ```
 
-### Flags
-
-| Flag | Description |
-|------|-------------|
-| `--dry-run` | Preview changes without writing |
-| `--json` | Output machine-readable JSON |
-| `--stdin` | Read replacement content from stdin (skip hex encoding) |
-| `--help` | Show full usage (including LLM agent guide) |
-
-### Heredoc Input (--stdin)
-
-For LLM agents, `--stdin` with heredoc avoids hex encoding entirely:
+## Quick Start
 
 ```bash
-sniper file.rs 10 15 --stdin <<'SNIPER_EOF'
-fn hello() {
-    println!("$world {}", x);
-    let escaped = "quotes \"inside\" quotes";
-}
-SNIPER_EOF
+cargo install --path .
+sniper undo target.rs
 ```
 
-Single-quoted heredoc (`'SNIPER_EOF'`) disables ALL shell interpolation — content arrives byte-for-byte. Works with `--manifest` too:
+## The Contract
+`moesniper` enables LLMs to perform atomic, backup-preserving edits. Now integrated with LLMOSafe v0.4.0 for metabolic integrity (auto-throttling on high I/O) and Backtrack Signal (-7) handling.
 
-```bash
-sniper file.rs --manifest --stdin < ops.json
-```
+## The Engine
+Uses temporary files and atomic renaming. Edits are processed through memory, guarded by LLMOSafe. If a write triggers a back-pressure signal, the rename is aborted, and backups are preserved.
 
-## LLM Agent Workflow
-
-```bash
-# 1. Find the lines you want to edit (using ix)
-ix "fn main" file.rs
-
-# 2. Encode your replacement content
-echo -n 'fn main() {}' | xxd -p | tr -d '\n'
-# Output: 666e206d61696e2829207b7d
-
-# 3. Dry-run to preview (safe - never modifies files)
-sniper --json --dry-run file.rs 5 5 666e206d61696e2829207b7d
-
-# 4. Apply the edit
-sniper --json file.rs 5 5 666e206d61696e2829207b7d
-
-# 5. Undo if something went wrong
-sniper --json file.rs --undo
-```
-
-## Hex Encoding
-
-All replacement content must be hex-encoded. This prevents shell mangling of special characters.
-
-```bash
-# Encode your text
-echo -n 'use petgraph' | xxd -p
-# Output: 757365207065746772617068
-
-# Decode a hex string
-echo 757365207065746772617068 | xxd -r -p
-```
-
-## Manifest Format
-
-A manifest is a JSON array of operations applied **bottom-up** (highest line first) so line numbers in the original file stay valid:
-
-```json
-[
-  {"start": 10, "end": 12, "hex": "6e6577"},
-  {"start": 5, "end": 7, "delete": true},
-  {"start": 1, "hex": "6869"}
-]
-```
-
-- `start`/`end`: 1-indexed line range (inclusive)
-- `hex`: replacement content (hex-encoded)
-- `delete`: set to `true` to delete the range (no hex needed)
-
-Run: `sniper target_file.rs --manifest ops.json`
-
-## JSON Output
-
-```bash
-sniper --json file.rs 5 5 6869
-```
-
-```json
-{
-  "status": "ok",
-  "file": "file.rs",
-  "lines_removed": 1,
-  "lines_inserted": 1,
-  "total_lines": 42,
-  "backup": ".sniper/file.rs.1712345678",
-  "ai_hint": "verify: read file.rs lines 5-5"
-}
-```
-
-The `ai_hint` field provides contextual guidance for the next step (e.g., `"verify:"`, `"check path"`, `"read file first"`). It helps LLM agents recover from errors or verify success.
-
-## Backups
-
-Every edit automatically creates a backup in `.sniper/`:
-
-```
-.sniper/
-  file.rs.1712345678    # timestamped backup
-```
-
-Undo restores the most recent backup: `sniper file.rs --undo`
-
-## License
-
-MIT
+## Context
+Text editing is brittle for LLMs. `moesniper` replaces naive `sed` or `cat` patching with precision, deterministic splicing.

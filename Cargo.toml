@@ -1,6 +1,6 @@
 [package]
 name = "moesniper"
-version = "0.2.0"
+version = "0.3.0-alpha"
 edition = "2021"
 description = "Escape-proof precision file editor for LLM agents. Hex-encoded content, line-range splicing, atomic writes."
 license = "MIT"
@@ -18,7 +18,8 @@ path = "src/lib.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-moeix = "0.1"
+moeix = { version = "0.2.0-alpha", path = "../ix" }
+llmosafe = { version = "0.4.0-alpha", path = "../ix/tests/docker_llmosafe_vendor" }
 
 [dev-dependencies]
 tempfile = "3"
