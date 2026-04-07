@@ -34,15 +34,16 @@ fn main() {
             "  sniper <file> <start> <end> --delete    Delete lines start-end\n",
             "  sniper <file> --manifest <path>         Batch ops from JSON (applied bottom-up)\n",
             "  sniper <file> --undo                    Restore from last backup (supports multi-step)\n",
-            "  sniper encode <text>                    Output hex-encoded string\n",
+            "  sniper encode [--stdin | --file <p>]    Output hex-encoded string (use --stdin for safety)\n",
             "\n",
             "FLAGS:\n",
             "  --dry-run   Preview changes without applying\n",
             "  --json      Machine-readable JSON output\n",
             "\n",
             "ENCODING:\n",
-            "  Content is hex-encoded: sniper encode 'your text'\n",
-            "  Example: sniper file.rs 42 42 757365207065746772617068\n",
+            "  Truly escape-proof: cat code.rs | sniper encode --stdin\n",
+            "  From file:          sniper encode --file snippet.txt\n",
+            "  Positional (UNSAFE): sniper encode 'text' (subject to shell escaping)\n",
             "\n",
             "MANIFEST FORMAT:\n",
             "  [{{\"start\": 42, \"end\": 45, \"hex\": \"6e6577\"}}, {{\"start\": 10, \"delete\": true}}]\n",
@@ -108,6 +109,19 @@ fn main() {
         .collect();
 
     let result = match args.as_slice() {
+        ["encode"] if use_stdin => {
+            let mut buffer = String::new();
+            match std::io::stdin().read_to_string(&mut buffer) {
+                Ok(_) => cmd_encode(&buffer),
+                Err(e) => err(format!("read stdin: {e}")),
+            }
+        }
+        ["encode", "--file", path] => {
+            match fs::read_to_string(path) {
+                Ok(content) => cmd_encode(&content),
+                Err(e) => err(format!("read {path}: {e}")),
+            }
+        }
         ["encode", text] => cmd_encode(text),
         [file, "--undo"] => cmd_undo(file),
         [file, "--manifest"] if use_stdin => cmd_manifest_stdin(file, dry_run),
