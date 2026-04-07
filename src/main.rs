@@ -457,12 +457,12 @@ mod tests {
 
     #[test]
     fn test_hex_decode_non_hex_chars() {
-        assert_eq!(hex_decode("zz").unwrap(), "");
+        assert!(hex_decode("zz").is_err());
     }
 
     #[test]
     fn test_hex_decode_odd_length() {
-        assert_eq!(hex_decode("48650").unwrap(), "He");
+        assert!(hex_decode("48650").is_err());
     }
 
     // --- cmd_splice tests ---
@@ -477,6 +477,28 @@ mod tests {
         assert_eq!(r.lines_inserted, 1);
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "line1\nhex\nline3\n");
+    }
+
+    #[test]
+    fn test_cmd_splice_preserves_missing_trailing_newline() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "test.txt", "line1\nline2");
+        let r = cmd_splice(&path, 2, 2, "new", false);
+        assert_eq!(r.status, "ok");
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "line1\nnew");
+        assert!(!content.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_cmd_splice_preserves_existing_trailing_newline() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "test.txt", "line1\nline2\n");
+        let r = cmd_splice(&path, 2, 2, "new", false);
+        assert_eq!(r.status, "ok");
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "line1\nnew\n");
+        assert!(content.ends_with('\n'));
     }
 
     #[test]
@@ -687,24 +709,21 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_decode_non_hex_returns_empty_string() {
-        // Non-hex chars get filtered, resulting in valid empty output
+    fn test_hex_decode_non_hex_returns_error() {
         let result = hex_decode("gg");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "");
+        assert!(result.is_err());
     }
 
     #[test]
     fn test_manifest_with_invalid_hex_in_op() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\n");
-        // "GG" is not valid hex, decodes to empty -> deletes line 1
+        // "GG" is not valid hex, now returns error
         let manifest = r#"[{"start": 1, "end": 1, "hex": "GG"}]"#;
         let manifest_path = create_file(&dir, "ops.json", manifest);
         let r = cmd_manifest(&path, &manifest_path, false);
-        assert_eq!(r.status, "ok");
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "b\n");
+        assert_eq!(r.status, "error");
+        assert!(r.message.as_deref().unwrap().contains("hex decode"));
     }
 
     #[test]

@@ -4,25 +4,33 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use std::thread;
 
-use llmosafe::llmosafe_sense_vitals;
+use llmosafe::ResourceGuard;
 
 pub const BACKUP_DIR: &str = ".sniper";
 
+/// Strict hex decoding: skips whitespace, errors on non-hex or odd-length strings.
 pub fn hex_decode(hex: &str) -> Result<String, String> {
-    let bytes: Vec<u8> = hex
-        .as_bytes()
-        .chunks(2)
-        .filter_map(|chunk| {
-            if chunk.len() == 2 {
-                std::str::from_utf8(chunk)
-                    .ok()
-                    .and_then(|s| u8::from_str_radix(s, 16).ok())
-            } else {
-                None
-            }
-        })
+    let clean: String = hex
+        .chars()
+        .filter(|c| !c.is_whitespace())
         .collect();
-    String::from_utf8(bytes).map_err(|e| format!("hex decode: {e}"))
+
+    if !clean.len().is_multiple_of(2) {
+        return Err(format!("odd-length hex string: {}", clean.len()));
+    }
+
+    if let Some(c) = clean.chars().find(|c| !c.is_ascii_hexdigit()) {
+        return Err(format!("invalid hex character: '{c}'"));
+    }
+
+    let mut bytes = Vec::with_capacity(clean.len() / 2);
+    for i in (0..clean.len()).step_by(2) {
+        let res = u8::from_str_radix(&clean[i..i+2], 16)
+            .map_err(|e| format!("hex decode at byte {}: {e}", i / 2))?;
+        bytes.push(res);
+    }
+
+    String::from_utf8(bytes).map_err(|e| format!("utf8 decode: {e}"))
 }
 
 pub fn create_backup(filepath: &str) -> Result<String, String> {
@@ -62,53 +70,41 @@ pub fn create_backup(filepath: &str) -> Result<String, String> {
 }
 
 pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
-    let tmp = format!("{filepath}.sniper_tmp");
-    let mut f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
-    for (i, line) in lines.iter().enumerate() {
-        f.write_all(line.as_bytes())
-            .map_err(|e| format!("write: {e}"))?;
-        if i < lines.len() - 1 {
-            f.write_all(b"\n")
-                .map_err(|e| format!("write newline: {e}"))?;
-        }
-    }
-    f.write_all(b"\n")
-        .map_err(|e| format!("write trailing newline: {e}"))?;
-    drop(f);
-
-    let vitals = llmosafe_sense_vitals();
-    if vitals.iowait_percent > 15.0 {
-        thread::sleep(Duration::from_millis(250));
-    }
-
-    match fs::rename(&tmp, filepath) {
-        Ok(_) => Ok(()),
-        Err(e) if e.raw_os_error() == Some(-7) => {
-            eprintln!("CRITICAL: Immune Memory Triggered: Aborting Atomic Write.");
-            Err("BacktrackSignaled: Atomic write aborted".to_string())
-        }
-        Err(e) => Err(format!("rename: {e}")),
-    }
+    let original = fs::read_to_string(filepath).unwrap_or_default();
+    let has_trailing_newline = !original.is_empty() && original.ends_with('\n');
+    write_atomic_impl(filepath, lines, has_trailing_newline)
 }
 
 pub fn write_atomic_owned(filepath: &str, lines: &[String]) -> Result<(), String> {
+    let original = fs::read_to_string(filepath).unwrap_or_default();
+    let has_trailing_newline = !original.is_empty() && original.ends_with('\n');
+    write_atomic_impl(filepath, lines, has_trailing_newline)
+}
+
+/// Unified atomic write with metabolic pacing via llmosafe 0.4.1.
+fn write_atomic_impl<S: AsRef<str>>(
+    filepath: &str,
+    lines: &[S],
+    has_trailing_newline: bool,
+) -> Result<(), String> {
     let tmp = format!("{filepath}.sniper_tmp");
     let mut f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
     for (i, line) in lines.iter().enumerate() {
-        f.write_all(line.as_bytes())
+        f.write_all(line.as_ref().as_bytes())
             .map_err(|e| format!("write: {e}"))?;
-        if i < lines.len() - 1 {
+        // Add newline if it's not the last line OR if the original file had a trailing newline.
+        if i < lines.len() - 1 || has_trailing_newline {
             f.write_all(b"\n")
                 .map_err(|e| format!("write newline: {e}"))?;
         }
     }
-    f.write_all(b"\n")
-        .map_err(|e| format!("write trailing newline: {e}"))?;
     drop(f);
 
-    let vitals = llmosafe_sense_vitals();
-    if vitals.iowait_percent > 15.0 {
-        thread::sleep(Duration::from_millis(250));
+    // Metabolic Pacing: entropy-weighted sleep (256MB memory ceiling).
+    let guard = ResourceGuard::new(256 * 1024 * 1024);
+    let entropy = guard.raw_entropy(); // note: sleeps 100ms internally on Linux for delta measurement.
+    if entropy > 500 {
+        thread::sleep(Duration::from_millis((entropy / 2) as u64));
     }
 
     match fs::rename(&tmp, filepath) {
