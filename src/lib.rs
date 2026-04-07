@@ -106,18 +106,38 @@ pub fn find_latest_backup(filepath: &str) -> Result<Option<PathBuf>, String> {
 }
 
 pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
-    let original = fs::read_to_string(filepath).unwrap_or_default();
-    let has_trailing_newline = !original.is_empty() && original.ends_with('\n');
+    let has_trailing_newline = check_trailing_newline(filepath)?;
     write_atomic_impl(filepath, lines, has_trailing_newline)
 }
 
 pub fn write_atomic_owned(filepath: &str, lines: &[String]) -> Result<(), String> {
-    let original = fs::read_to_string(filepath).unwrap_or_default();
-    let has_trailing_newline = !original.is_empty() && original.ends_with('\n');
+    let has_trailing_newline = check_trailing_newline(filepath)?;
     write_atomic_impl(filepath, lines, has_trailing_newline)
 }
 
-/// Unified atomic write with metabolic pacing via llmosafe 0.4.1.
+fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
+    use std::io::{Seek, SeekFrom, Read};
+    let mut f = match fs::File::open(filepath) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(format!("open {filepath}: {e}")),
+    };
+    let metadata = f.metadata().map_err(|e| format!("metadata {filepath}: {e}"))?;
+    if metadata.len() == 0 {
+        return Ok(false);
+    }
+    if let Err(_) = f.seek(SeekFrom::End(-1)) {
+        return Ok(false);
+    }
+    let mut last_byte = [0u8; 1];
+    if f.read_exact(&mut last_byte).is_err() {
+        return Ok(false);
+    }
+    Ok(last_byte[0] == b'\n')
+}
+
+/// Unified atomic write with metabolic pacing via llmosafe 0.4.2.
+/// Ensures consistent line endings and preserves trailing newline state.
 fn write_atomic_impl<S: AsRef<str>>(
     filepath: &str,
     lines: &[S],
@@ -126,29 +146,78 @@ fn write_atomic_impl<S: AsRef<str>>(
     let tmp = format!("{filepath}.sniper_tmp");
     let mut f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
     for (i, line) in lines.iter().enumerate() {
-        f.write_all(line.as_ref().as_bytes())
-            .map_err(|e| format!("write: {e}"))?;
-        // Add newline if it's not the last line OR if the original file had a trailing newline.
-        if i < lines.len() - 1 || has_trailing_newline {
-            f.write_all(b"\n")
-                .map_err(|e| format!("write newline: {e}"))?;
+        let s = line.as_ref();
+        f.write_all(s.as_bytes()).map_err(|e| format!("write: {e}"))?;
+        
+        // Add newline if the provided line does not already end with one,
+        // and it is either not the last line OR the original file had a trailing newline.
+        if !s.ends_with('\n') {
+            if i < lines.len() - 1 || has_trailing_newline {
+                f.write_all(b"\n").map_err(|e| format!("write newline: {e}"))?;
+            }
         }
     }
     drop(f);
 
     // Metabolic Pacing: entropy-weighted sleep (256MB memory ceiling).
     let guard = ResourceGuard::new(256 * 1024 * 1024);
-    let entropy = guard.raw_entropy(); // note: sleeps 100ms internally on Linux for delta measurement.
+    let entropy = guard.raw_entropy(); 
     if entropy > 500 {
         thread::sleep(Duration::from_millis((entropy / 2) as u64));
     }
 
     match fs::rename(&tmp, filepath) {
         Ok(_) => Ok(()),
-        Err(e) if e.raw_os_error() == Some(-7) => {
-            eprintln!("CRITICAL: Immune Memory Triggered: Aborting Atomic Write.");
-            Err("BacktrackSignaled: Atomic write aborted".to_string())
+        Err(e) => Err(handle_backtrack_error(e, "Atomic write")),
+    }
+}
+
+/// Centralized handling for llmosafe Backtrack Signal (-7).
+pub fn handle_backtrack_error(e: std::io::Error, context: &str) -> String {
+    if e.raw_os_error() == Some(-7) {
+        format!("CRITICAL: {context} aborted via llmosafe 0.4.2 Backtrack Signal (-7). Immune memory triggered: current state matches a previously rolled-back failure pattern.")
+    } else {
+        format!("{context}: {e}")
+    }
+}
+
+/// Simple file-based lock in the .sniper directory.
+/// Locks are file-specific to prevent concurrent edits/undos to the same file.
+pub struct SniperLock {
+    lock_path: PathBuf,
+}
+
+impl SniperLock {
+    pub fn acquire(filepath: &str) -> Result<Self, String> {
+        let normalized = normalize_path(filepath)?;
+        let hash = get_path_hash(&normalized);
+        let dir = PathBuf::from(BACKUP_DIR);
+        fs::create_dir_all(&dir).map_err(|e| format!("create .sniper: {e}"))?;
+        let lock_path = dir.join(format!("sniper.{}.lock", hash));
+
+        // Simple spin-lock with 2s timeout
+        let start = SystemTime::now();
+        loop {
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(_) => return Ok(Self { lock_path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if start.elapsed().unwrap_or(Duration::ZERO).as_secs() > 2 {
+                        return Err(format!("timeout: another sniper process is editing {} (lock held)", filepath));
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => return Err(format!("lock acquire for {filepath}: {e}")),
+            }
         }
-        Err(e) => Err(format!("rename: {e}")),
+    }
+}
+
+impl Drop for SniperLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.lock_path);
     }
 }
