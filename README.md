@@ -36,6 +36,12 @@ sniper file.rs --undo
 sniper file.rs --undo
 ```
 
+## Contributing
+Contributions are welcome! Please see [CONTRIBUTING.md](docs/CONTRIBUTING.md) for details.
+
+## License
+`moesniper` is released under the [MIT License](LICENSE).
+
 ## The Engine
 Uses temporary files and atomic renaming. Edits are processed through memory, guarded by `llmosafe`'s `ResourceGuard`. If system entropy is high, the tool applies dynamic back-pressure (sleep) before completing the write.
 
