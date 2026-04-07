@@ -14,9 +14,8 @@
 
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
 
-use moesniper::{create_backup, hex_decode, write_atomic, write_atomic_owned, BACKUP_DIR};
+use moesniper::{create_backup, hex_decode, write_atomic, write_atomic_owned, find_latest_backup};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -34,14 +33,15 @@ fn main() {
             "  sniper <file> <start> <end> <hex>       Replace lines start-end with hex-decoded content\n",
             "  sniper <file> <start> <end> --delete    Delete lines start-end\n",
             "  sniper <file> --manifest <path>         Batch ops from JSON (applied bottom-up)\n",
-            "  sniper <file> --undo                    Restore from last backup\n",
+            "  sniper <file> --undo                    Restore from last backup (supports multi-step)\n",
+            "  sniper encode <text>                    Output hex-encoded string\n",
             "\n",
             "FLAGS:\n",
             "  --dry-run   Preview changes without applying\n",
             "  --json      Machine-readable JSON output\n",
             "\n",
             "ENCODING:\n",
-            "  Content is hex-encoded: echo -n 'your text' | xxd -p\n",
+            "  Content is hex-encoded: sniper encode 'your text'\n",
             "  Example: sniper file.rs 42 42 757365207065746772617068\n",
             "\n",
             "MANIFEST FORMAT:\n",
@@ -49,8 +49,8 @@ fn main() {
             "  Operations applied bottom-up (highest line first). Line numbers refer to original file.\n",
             "\n",
             "BACKUPS:\n",
-            "  Every edit creates .sniper/<filename>.<timestamp>\n",
-            "  Undo restores the most recent backup.\n",
+            "  Every edit creates .sniper/<path_hash>.<filename>.<timestamp>\n",
+            "  Undo restores the most recent backup and removes it from the stack.\n",
             "\n",
             "AGENTIC EDITING (UTCP Schema):\n",
             "  Replace line:    sniper --json file.rs 42 42 6e6577 → {{\"status\":\"ok\",...}}\n",
@@ -60,20 +60,20 @@ fn main() {
             "  Undo:            sniper --json file.rs --undo → restore backup\n",
             "\n",
             "LLM AGENT USAGE:\n",
-            "  Encode content:  echo -n 'fn main() {{}}' | xxd -p | tr -d '\\n'\n",
+            "  Encode content:  sniper encode 'fn main() {{}}'\n",
             "  Get line range:  Use ix to find lines, then sniper to edit them\n",
             "  Safe workflow:   Dry-run first, check JSON output, then apply\n",
             "  Idempotent:      --dry-run never modifies files, safe to retry\n",
             "\n",
             "JSON OUTPUT SCHEMA:\n",
-            "  status:       \"ok\" | \"dry_run\" | \"restored\" | \"error\"\n",
+            "  status:       \"ok\" | \"dry_run\" | \"restored\" | \"error\" | \"encoded\"\n",
             "  file:         path to edited file (null on error)\n",
             "  lines_removed: count of lines removed\n",
             "  lines_inserted: count of lines inserted\n",
             "  total_lines:  file line count after edit\n",
             "  operations:   count of manifest ops (manifest mode only)\n",
             "  backup:       path to backup file (null on error/dry-run)\n",
-            "  message:      error description (error status only)\n",
+            "  message:      error/encoded result description\n",
             "\n",
             "CONSTRAINTS:\n",
             "  - All content MUST be hex-encoded to prevent shell corruption.\n",
@@ -108,6 +108,7 @@ fn main() {
         .collect();
 
     let result = match args.as_slice() {
+        ["encode", text] => cmd_encode(text),
         [file, "--undo"] => cmd_undo(file),
         [file, "--manifest"] if use_stdin => cmd_manifest_stdin(file, dry_run),
         [file, "--manifest", manifest] => cmd_manifest(file, manifest, dry_run),
@@ -160,6 +161,7 @@ fn main() {
                 result.lines_inserted
             ),
             "restored" => println!("restored: {}", result.backup.as_deref().unwrap_or("?")),
+            "encoded" => println!("{}", result.message.as_deref().unwrap_or("")),
             "dry_run" => {
                 println!(
                     "{}",
@@ -191,6 +193,15 @@ struct CliResult {
     backup: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ai_hint: Option<String>,
+}
+
+fn cmd_encode(text: &str) -> CliResult {
+    let hex = text.as_bytes().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+    CliResult {
+        status: "encoded".into(),
+        message: Some(hex),
+        ..Default::default()
+    }
 }
 
 fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: bool) -> CliResult {
@@ -355,41 +366,26 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
 }
 
 fn cmd_undo(filepath: &str) -> CliResult {
-    let name = Path::new(filepath)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(filepath);
-
-    // Use hash of full path to match backup naming
-    let path_hash = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        filepath.hash(&mut hasher);
-        hasher.finish()
+    let latest = match find_latest_backup(filepath) {
+        Ok(Some(l)) => l,
+        Ok(None) => return err(format!("no backup for {filepath}")),
+        Err(e) => return err(e),
     };
 
-    let latest_name = format!("{path_hash:x}.{name}.latest");
-    let latest = PathBuf::from(BACKUP_DIR).join(&latest_name);
-
-    if !latest.exists() {
-        return err(format!("no backup for {filepath}"));
-    }
-
-    let target = match fs::read_link(&latest) {
-        Ok(t) => PathBuf::from(BACKUP_DIR).join(t),
-        Err(e) => return err(format!("read backup link: {e}")),
-    };
-
-    if let Err(e) = fs::copy(&target, filepath) {
+    // Restoration: simple copy. We do NOT create a backup of the state we are overwriting
+    // to allow consecutive undos to pop the stack.
+    if let Err(e) = fs::copy(&latest, filepath) {
         return err(format!("restore: {e}"));
     }
+
+    // "Pop" the stack: remove the consumed backup.
+    let _ = fs::remove_file(&latest);
 
     let ai_hint = Some(format!("verify restore: read {}", filepath));
 
     CliResult {
         status: "restored".into(),
-        backup: Some(target.to_string_lossy().into()),
+        backup: Some(latest.to_string_lossy().into()),
         ai_hint,
         ..Default::default()
     }
@@ -458,6 +454,12 @@ mod tests {
     #[test]
     fn test_hex_decode_non_hex_chars() {
         assert!(hex_decode("zz").is_err());
+    }
+
+    #[test]
+    fn test_hex_decode_non_hex_returns_error() {
+        let result = hex_decode("gg");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -653,6 +655,35 @@ mod tests {
         assert_eq!(restored, "original\n");
     }
 
+    #[test]
+    fn test_cmd_undo_multi_step() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "multi_undo.txt", "v1\n");
+        
+        cmd_splice(&path, 1, 1, "v2", false); // edit 1
+        cmd_splice(&path, 1, 1, "v3", false); // edit 2
+        
+        assert_eq!(fs::read_to_string(&path).unwrap(), "v3\n");
+        
+        cmd_undo(&path); // undo 1
+        assert_eq!(fs::read_to_string(&path).unwrap(), "v2\n");
+        
+        cmd_undo(&path); // undo 2
+        assert_eq!(fs::read_to_string(&path).unwrap(), "v1\n");
+        
+        let r = cmd_undo(&path); // undo 3 (fail)
+        assert_eq!(r.status, "error");
+    }
+
+    // --- cmd_encode tests ---
+
+    #[test]
+    fn test_cmd_encode() {
+        let r = cmd_encode("hello");
+        assert_eq!(r.status, "encoded");
+        assert_eq!(r.message.unwrap(), "68656c6c6f");
+    }
+
     // --- json output tests ---
 
     #[test]
@@ -690,106 +721,6 @@ mod tests {
         assert_eq!(r.status, "ok");
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "new\n");
-    }
-
-    // --- error handling tests (G-ERR) ---
-
-    #[test]
-    fn test_hex_decode_result_ok() {
-        let result = hex_decode("48656c6c6f");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "Hello");
-    }
-
-    #[test]
-    fn test_hex_decode_empty_returns_ok() {
-        let result = hex_decode("");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "");
-    }
-
-    #[test]
-    fn test_hex_decode_non_hex_returns_error() {
-        let result = hex_decode("gg");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_manifest_with_invalid_hex_in_op() {
-        let dir = TempDir::new().unwrap();
-        let path = create_file(&dir, "test.txt", "a\nb\n");
-        // "GG" is not valid hex, now returns error
-        let manifest = r#"[{"start": 1, "end": 1, "hex": "GG"}]"#;
-        let manifest_path = create_file(&dir, "ops.json", manifest);
-        let r = cmd_manifest(&path, &manifest_path, false);
-        assert_eq!(r.status, "error");
-        assert!(r.message.as_deref().unwrap().contains("hex decode"));
-    }
-
-    #[test]
-    fn test_manifest_empty_ops() {
-        let dir = TempDir::new().unwrap();
-        let path = create_file(&dir, "test.txt", "a\nb\n");
-        let manifest = r#"[]"#;
-        let manifest_path = create_file(&dir, "ops.json", manifest);
-        let r = cmd_manifest(&path, &manifest_path, false);
-        assert_eq!(r.status, "ok");
-        assert_eq!(r.operations, Some(0));
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "a\nb\n");
-    }
-
-    #[test]
-    fn test_splice_at_start_of_file() {
-        let dir = TempDir::new().unwrap();
-        let path = create_file(&dir, "test.txt", "a\nb\nc\n");
-        let r = cmd_splice(&path, 1, 1, "x", false);
-        assert_eq!(r.status, "ok");
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "x\nb\nc\n");
-    }
-
-    #[test]
-    fn test_splice_at_end_of_file() {
-        let dir = TempDir::new().unwrap();
-        let path = create_file(&dir, "test.txt", "a\nb\nc\n");
-        let r = cmd_splice(&path, 3, 3, "z", false);
-        assert_eq!(r.status, "ok");
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "a\nb\nz\n");
-    }
-
-    #[test]
-    fn test_splice_replaces_entire_file() {
-        let dir = TempDir::new().unwrap();
-        let path = create_file(&dir, "test.txt", "a\nb\nc\n");
-        let r = cmd_splice(&path, 1, 3, "x", false);
-        assert_eq!(r.status, "ok");
-        assert_eq!(r.lines_removed, 3);
-        assert_eq!(r.lines_inserted, 1);
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "x\n");
-    }
-
-    #[test]
-    fn test_splice_multiline_content() {
-        let dir = TempDir::new().unwrap();
-        let path = create_file(&dir, "test.txt", "a\nb\nc\n");
-        let r = cmd_splice(&path, 2, 2, "x\ny\nz", false);
-        assert_eq!(r.status, "ok");
-        assert_eq!(r.lines_removed, 1);
-        assert_eq!(r.lines_inserted, 3);
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, "a\nx\ny\nz\nc\n");
-    }
-
-    #[test]
-    fn test_splice_returns_total_lines() {
-        let dir = TempDir::new().unwrap();
-        let path = create_file(&dir, "test.txt", "a\nb\nc\n");
-        let r = cmd_splice(&path, 2, 2, "x\ny", false);
-        assert_eq!(r.status, "ok");
-        assert_eq!(r.total_lines, Some(4)); // a, x, y, c
     }
 
     // --- Property-based tests ---

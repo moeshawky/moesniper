@@ -33,40 +33,76 @@ pub fn hex_decode(hex: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|e| format!("utf8 decode: {e}"))
 }
 
+pub fn normalize_path(path: &str) -> Result<PathBuf, String> {
+    let p = Path::new(path);
+    if p.exists() {
+        p.canonicalize().map_err(|e| format!("canonicalize {path}: {e}"))
+    } else {
+        // Fallback for new files: canonicalize parent and join name
+        let parent = p.parent().unwrap_or_else(|| Path::new("."));
+        let abs_parent = parent.canonicalize().map_err(|e| format!("canonicalize parent of {path}: {e}"))?;
+        let name = p.file_name().ok_or_else(|| format!("invalid filename: {path}"))?;
+        Ok(abs_parent.join(name))
+    }
+}
+
+pub fn get_path_hash(path: &Path) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
 pub fn create_backup(filepath: &str) -> Result<String, String> {
+    let normalized = normalize_path(filepath)?;
+    let hash = get_path_hash(&normalized);
+    
     let dir = PathBuf::from(BACKUP_DIR);
     fs::create_dir_all(&dir).map_err(|e| format!("create backup dir: {e}"))?;
 
-    // Use hash of full path to prevent cross-directory collisions
-    let path_hash = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        filepath.hash(&mut hasher);
-        hasher.finish()
-    };
-
-    let name = Path::new(filepath)
-        .file_name()
+    let name = normalized.file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
     let ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_nanos()) // Nano-precision to prevent collision in fast scripts
         .map_err(|e| format!("timestamp: {e}"))?;
 
-    let backup_name = format!("{path_hash:x}.{name}.{ts}");
+    let backup_name = format!("{hash}.{name}.{ts}");
     let dst = dir.join(&backup_name);
-    fs::copy(filepath, &dst).map_err(|e| format!("backup copy: {e}"))?;
-
-    let latest_name = format!("{path_hash:x}.{name}.latest");
-    let latest = dir.join(&latest_name);
-    let _ = fs::remove_file(&latest);
-    #[cfg(unix)]
-    let _ = std::os::unix::fs::symlink(&backup_name, &latest);
+    
+    if normalized.exists() {
+        fs::copy(&normalized, &dst).map_err(|e| format!("backup copy: {e}"))?;
+    } else {
+        // For new files, create an empty backup to mark the "nothing" state
+        fs::File::create(&dst).map_err(|e| format!("create empty backup: {e}"))?;
+    }
 
     Ok(dst.to_string_lossy().into())
+}
+
+/// Finds the most recent backup for a given file.
+pub fn find_latest_backup(filepath: &str) -> Result<Option<PathBuf>, String> {
+    let normalized = normalize_path(filepath)?;
+    let hash = get_path_hash(&normalized);
+    let dir = PathBuf::from(BACKUP_DIR);
+    
+    if !dir.exists() {
+        return Ok(None);
+    }
+
+    let mut backups: Vec<_> = fs::read_dir(dir)
+        .map_err(|e| format!("read backup dir: {e}"))?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
+        .map(|e| e.path())
+        .collect();
+
+    // Sort by name (which ends in timestamp)
+    backups.sort();
+    Ok(backups.pop())
 }
 
 pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
