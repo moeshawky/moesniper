@@ -33,8 +33,12 @@ fn test_multi_step_undo_stack() {
             .status()
             .unwrap();
         assert!(status.success());
-        
-        let expected = if i == 0 { "v0\n".to_string() } else { format!("{}\n", i) };
+
+        let expected = if i == 0 {
+            "v0\n".to_string()
+        } else {
+            format!("{}\n", i)
+        };
         assert_eq!(fs::read_to_string(&file_path).unwrap(), expected);
     }
 
@@ -89,14 +93,18 @@ fn test_encode_stdin_integrity() {
 
     let output = child.wait_with_output().unwrap();
     let hex = String::from_utf8(output.stdout).unwrap().trim().to_string();
-    
+
     // Check roundtrip
     let status = sniper()
         .args(&["encode", "--stdin"])
         .stdin(std::process::Stdio::piped()) // wait, sniper doesn't have decode yet, use internal helper logic
         .status(); // dummy call to verify it runs
-    
-    let expected_hex: String = input.as_bytes().iter().map(|b| format!("{:02x}", b)).collect();
+
+    let expected_hex: String = input
+        .as_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
     assert_eq!(hex, expected_hex);
 }
 
@@ -107,12 +115,24 @@ fn test_splicing_boundaries() {
     fs::write(&file_path, "line1\nline2\nline3\n").unwrap();
 
     // Insert at start (line 1)
-    sniper().args(&[file_path.to_str().unwrap(), "1", "0", "610a"]).status().unwrap(); // "a\n"
-    assert_eq!(fs::read_to_string(&file_path).unwrap(), "a\nline1\nline2\nline3\n");
+    sniper()
+        .args(&[file_path.to_str().unwrap(), "1", "0", "610a"])
+        .status()
+        .unwrap(); // "a\n"
+    assert_eq!(
+        fs::read_to_string(&file_path).unwrap(),
+        "a\nline1\nline2\nline3\n"
+    );
 
     // Insert at end (line 5)
-    sniper().args(&[file_path.to_str().unwrap(), "5", "4", "7a"]).status().unwrap(); // "z"
-    assert_eq!(fs::read_to_string(&file_path).unwrap(), "a\nline1\nline2\nline3\nz\n"); // it adds newline if original had one
+    sniper()
+        .args(&[file_path.to_str().unwrap(), "5", "4", "7a"])
+        .status()
+        .unwrap(); // "z"
+    assert_eq!(
+        fs::read_to_string(&file_path).unwrap(),
+        "a\nline1\nline2\nline3\nz\n"
+    ); // it adds newline if original had one
 }
 
 #[test]
@@ -122,7 +142,10 @@ fn test_unicode_payload() {
     fs::write(&file_path, "empty\n").unwrap();
 
     // "🦀" in hex is f09fa680
-    sniper().args(&[file_path.to_str().unwrap(), "1", "1", "f09fa680"]).status().unwrap();
+    sniper()
+        .args(&[file_path.to_str().unwrap(), "1", "1", "f09fa680"])
+        .status()
+        .unwrap();
     assert_eq!(fs::read_to_string(&file_path).unwrap(), "🦀\n");
 }
 
@@ -154,11 +177,11 @@ fn test_concurrency_locking() {
     }
 
     let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
-    
-    // At least one should succeed. Some might fail due to lock timeout (2s) 
+
+    // At least one should succeed. Some might fail due to lock timeout (2s)
     // because cargo run is slow, but the file should remain in a valid state.
     assert!(results.iter().any(|&r| r));
-    
+
     let final_content = fs::read_to_string(&*file_path).unwrap();
     assert!(final_content.len() > 0);
     // The history stack should also be consistent (no duplicated timestamps or half-written files)

@@ -16,8 +16,8 @@ use std::fs;
 use std::io::Read;
 
 use moesniper::{
-    create_backup, hex_decode, write_atomic, write_atomic_owned, find_latest_backup,
-    SniperLock, handle_backtrack_error
+    create_backup, find_latest_backup, handle_backtrack_error, hex_decode, write_atomic,
+    write_atomic_owned, SniperLock,
 };
 
 fn main() {
@@ -119,12 +119,10 @@ fn main() {
                 Err(e) => err(format!("read stdin: {e}")),
             }
         }
-        ["encode", "--file", path] => {
-            match fs::read_to_string(path) {
-                Ok(content) => cmd_encode(&content),
-                Err(e) => err(format!("read {path}: {e}")),
-            }
-        }
+        ["encode", "--file", path] => match fs::read_to_string(path) {
+            Ok(content) => cmd_encode(&content),
+            Err(e) => err(format!("read {path}: {e}")),
+        },
         ["encode", text] => cmd_encode(text),
         [file, "--undo"] => cmd_undo(file),
         [file, "--manifest"] if use_stdin => cmd_manifest_stdin(file, dry_run),
@@ -213,7 +211,11 @@ struct CliResult {
 }
 
 fn cmd_encode(text: &str) -> CliResult {
-    let hex = text.as_bytes().iter().map(|b| format!("{:02x}", b)).collect::<String>();
+    let hex = text
+        .as_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
     CliResult {
         status: "encoded".into(),
         message: Some(hex),
@@ -242,7 +244,7 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
     if start < 1 || end > lines.len() || start > end + 1 {
         // Special case: inserting at the end of a file that might not have a trailing newline
         if start == lines.len() + 1 && start == end + 1 {
-             // Allow inserting at end
+            // Allow inserting at end
         } else {
             return err(format!(
                 "line range {start}-{end} out of bounds (file has {} lines)",
@@ -710,18 +712,18 @@ mod tests {
     fn test_cmd_undo_multi_step() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "multi_undo.txt", "v1\n");
-        
+
         cmd_splice(&path, 1, 1, "v2", false); // edit 1
         cmd_splice(&path, 1, 1, "v3", false); // edit 2
-        
+
         assert_eq!(fs::read_to_string(&path).unwrap(), "v3\n");
-        
+
         cmd_undo(&path); // undo 1
         assert_eq!(fs::read_to_string(&path).unwrap(), "v2\n");
-        
+
         cmd_undo(&path); // undo 2
         assert_eq!(fs::read_to_string(&path).unwrap(), "v1\n");
-        
+
         let r = cmd_undo(&path); // undo 3 (fail)
         assert_eq!(r.status, "error");
     }
@@ -761,7 +763,12 @@ mod tests {
     fn test_file_not_found() {
         let r = cmd_splice("/tmp/no_such_file_12345.txt", 1, 1, "78", false);
         assert_eq!(r.status, "error");
-        assert!(r.message.as_deref().unwrap().to_lowercase().contains("read"));
+        assert!(r
+            .message
+            .as_deref()
+            .unwrap()
+            .to_lowercase()
+            .contains("read"));
     }
 
     #[test]
@@ -769,16 +776,16 @@ mod tests {
         let dir = TempDir::new().unwrap();
         // File: "a\nb" (no trailing newline)
         let path = create_file(&dir, "no_trailing.txt", "a\nb");
-        
+
         // Delete line 2 ("b")
         let r = cmd_splice(&path, 2, 2, "", false);
         assert_eq!(r.status, "ok");
-        
+
         let content = fs::read_to_string(&path).unwrap();
         // Currently, it will be "a\n" because "a\n" was the first line from split_inclusive.
         // If we want true precision, it should be "a".
         // Let's see what it is currently.
-        assert_eq!(content, "a\n"); 
+        assert_eq!(content, "a\n");
     }
 
     #[test]
