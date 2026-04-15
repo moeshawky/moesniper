@@ -95,7 +95,7 @@ fn test_encode_stdin_integrity() {
     let hex = String::from_utf8(output.stdout).unwrap().trim().to_string();
 
     // Check roundtrip
-    let status = sniper()
+    let _status = sniper()
         .args(&["encode", "--stdin"])
         .stdin(std::process::Stdio::piped()) // wait, sniper doesn't have decode yet, use internal helper logic
         .status(); // dummy call to verify it runs

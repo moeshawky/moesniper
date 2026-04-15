@@ -149,7 +149,8 @@ fn write_atomic_impl<S: AsRef<str>>(
     has_trailing_newline: bool,
 ) -> Result<(), String> {
     let tmp = format!("{filepath}.sniper_tmp");
-    let mut f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
+    let f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
+    let mut f = std::io::BufWriter::new(f);
     for (i, line) in lines.iter().enumerate() {
         let s = line.as_ref();
         f.write_all(s.as_bytes())
@@ -162,7 +163,7 @@ fn write_atomic_impl<S: AsRef<str>>(
                 .map_err(|e| format!("write newline: {e}"))?;
         }
     }
-    drop(f);
+    f.into_inner().map_err(|e| format!("flush: {e}"))?;
 
     // Metabolic Pacing: entropy-weighted sleep (256MB memory ceiling).
     let guard = ResourceGuard::new(256 * 1024 * 1024);
