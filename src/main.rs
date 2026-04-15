@@ -782,10 +782,10 @@ mod tests {
         assert_eq!(r.status, "ok");
 
         let content = fs::read_to_string(&path).unwrap();
-        // Currently, it will be "a\n" because "a\n" was the first line from split_inclusive.
-        // If we want true precision, it should be "a".
-        // Let's see what it is currently.
-        assert_eq!(content, "a\n");
+        // Because we delete the last line (which lacked a newline) and the original file lacked a trailing newline,
+        // the new file content should be preserved without a trailing newline.
+        // Thus, deleting line 2 ("b") from "a\nb" results in "a" uniformly.
+        assert_eq!(content, "a");
     }
 
     #[test]

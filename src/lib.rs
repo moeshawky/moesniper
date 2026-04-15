@@ -150,14 +150,20 @@ fn write_atomic_impl<S: AsRef<str>>(
 ) -> Result<(), String> {
     let tmp = format!("{filepath}.sniper_tmp");
     let mut f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
+    let num_lines = lines.len();
     for (i, line) in lines.iter().enumerate() {
         let s = line.as_ref();
-        f.write_all(s.as_bytes())
-            .map_err(|e| format!("write: {e}"))?;
+        let mut bytes = s.as_bytes();
 
-        // Add newline if the provided line does not already end with one,
-        // and it is either not the last line OR the original file had a trailing newline.
-        if !s.ends_with('\n') && (i < lines.len() - 1 || has_trailing_newline) {
+        // Strip trailing newline from the line string to handle it uniformly ourselves
+        if bytes.ends_with(b"\n") {
+            bytes = &bytes[..bytes.len() - 1];
+        }
+
+        f.write_all(bytes).map_err(|e| format!("write: {e}"))?;
+
+        let is_last = i == num_lines - 1;
+        if !is_last || has_trailing_newline {
             f.write_all(b"\n")
                 .map_err(|e| format!("write newline: {e}"))?;
         }
