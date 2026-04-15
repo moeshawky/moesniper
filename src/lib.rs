@@ -113,11 +113,6 @@ pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
     write_atomic_impl(filepath, lines, has_trailing_newline)
 }
 
-pub fn write_atomic_owned(filepath: &str, lines: &[String]) -> Result<(), String> {
-    let has_trailing_newline = check_trailing_newline(filepath)?;
-    write_atomic_impl(filepath, lines, has_trailing_newline)
-}
-
 fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = match fs::File::open(filepath) {
