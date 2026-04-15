@@ -229,3 +229,26 @@ impl Drop for SniperLock {
         let _ = fs::remove_file(&self.lock_path);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io;
+
+    #[test]
+    fn test_handle_backtrack_error_signal_7() {
+        let err = io::Error::from_raw_os_error(-7);
+        let result = handle_backtrack_error(err, "TestContext");
+        assert_eq!(
+            result,
+            "CRITICAL: TestContext aborted via llmosafe 0.5.0 Backtrack Signal (-7). Immune memory triggered: current state matches a previously rolled-back failure pattern."
+        );
+    }
+
+    #[test]
+    fn test_handle_backtrack_error_other() {
+        let err = io::Error::new(io::ErrorKind::NotFound, "file not found");
+        let result = handle_backtrack_error(err, "TestContext");
+        assert_eq!(result, "TestContext: file not found");
+    }
+}
