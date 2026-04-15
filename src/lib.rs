@@ -96,16 +96,14 @@ pub fn find_latest_backup(filepath: &str) -> Result<Option<PathBuf>, String> {
         return Ok(None);
     }
 
-    let mut backups: Vec<_> = fs::read_dir(dir)
+    let latest_backup = fs::read_dir(dir)
         .map_err(|e| format!("read backup dir: {e}"))?
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
         .map(|e| e.path())
-        .collect();
+        .max();
 
-    // Sort by name (which ends in timestamp)
-    backups.sort();
-    Ok(backups.pop())
+    Ok(latest_backup)
 }
 
 pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
