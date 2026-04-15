@@ -17,7 +17,7 @@ use std::io::Read;
 
 use moesniper::{
     create_backup, find_latest_backup, handle_backtrack_error, hex_decode, write_atomic,
-    write_atomic_owned, SniperLock,
+    SniperLock,
 };
 
 fn main() {
@@ -233,7 +233,7 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
         Ok(t) => t,
         Err(e) => return err(handle_backtrack_error(e, "Read")),
     };
-    let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
+    let mut lines: Vec<&str> = text.split_inclusive('\n').collect();
 
     // If the file does not end in a newline, the last line will not have one.
     // We must ensure that if we are adding lines, they end in a newline if the original file had one or if they are not the last line.
@@ -261,10 +261,10 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
         0
     };
 
-    let new_lines: Vec<String> = if content.is_empty() {
+    let new_lines: Vec<&str> = if content.is_empty() {
         vec![]
     } else {
-        content.split_inclusive('\n').map(String::from).collect()
+        content.split_inclusive('\n').collect()
     };
 
     let is_delete = content.is_empty();
@@ -299,8 +299,7 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
         lines.extend(new_lines);
     }
 
-    let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-    if let Err(e) = write_atomic(filepath, &lines_refs) {
+    if let Err(e) = write_atomic(filepath, &lines) {
         return err(e);
     }
 
@@ -345,19 +344,32 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
         Err(e) => return err(e),
     };
 
-    let mut ops: Vec<ManifestOp> = match serde_json::from_str(manifest) {
+    let ops: Vec<ManifestOp> = match serde_json::from_str(manifest) {
         Ok(o) => o,
         Err(e) => return err(format!("parse manifest: {e}")),
     };
+
+    let mut ops_with_content = Vec::with_capacity(ops.len());
+    for op in ops {
+        let content = if let Some(ref hex) = op.hex {
+            Some(match hex_decode(hex) {
+                Ok(c) => c,
+                Err(e) => return err(format!("hex decode in manifest: {e}")),
+            })
+        } else {
+            None
+        };
+        ops_with_content.push((op, content));
+    }
 
     let text = match fs::read_to_string(filepath) {
         Ok(t) => t,
         Err(e) => return err(handle_backtrack_error(e, "Read")),
     };
-    let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
+    let mut lines: Vec<&str> = text.split_inclusive('\n').collect();
 
     // Sort bottom-up
-    ops.sort_by(|a, b| b.start.cmp(&a.start));
+    ops_with_content.sort_by(|a, b| b.0.start.cmp(&a.0.start));
 
     let bk = if !dry_run {
         match create_backup(filepath) {
@@ -370,18 +382,14 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
     let mut total_removed = 0usize;
     let mut total_inserted = 0usize;
 
-    for op in &ops {
+    for (op, content_opt) in &ops_with_content {
         let s = op.start.saturating_sub(1);
         let e = op.end.unwrap_or(op.start);
 
         if op.delete.unwrap_or(false) {
             total_removed += lines.splice(s..e, std::iter::empty()).count();
-        } else if let Some(ref hex) = op.hex {
-            let content = match hex_decode(hex) {
-                Ok(c) => c,
-                Err(e) => return err(format!("hex decode in manifest: {e}")),
-            };
-            let new: Vec<String> = content.split_inclusive('\n').map(String::from).collect();
+        } else if let Some(ref content) = content_opt {
+            let new: Vec<&str> = content.split_inclusive('\n').collect();
             total_removed += e - s;
             total_inserted += new.len();
             lines.splice(s..e, new);
@@ -389,15 +397,17 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
     }
 
     if !dry_run {
-        if let Err(e) = write_atomic_owned(filepath, &lines) {
+        if let Err(e) = write_atomic(filepath, &lines) {
             return err(e);
         }
     }
 
+    let num_ops = ops_with_content.len();
+
     let ai_hint = Some(format!(
         "verify: read {} around line {}",
         filepath,
-        ops.first().map(|o| o.start).unwrap_or(1)
+        ops_with_content.first().map(|o| o.0.start).unwrap_or(1)
     ));
 
     CliResult {
@@ -406,7 +416,7 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
         lines_removed: total_removed,
         lines_inserted: total_inserted,
         total_lines: Some(lines.len()),
-        operations: Some(ops.len()),
+        operations: Some(num_ops),
         ai_hint,
         backup: bk,
         ..Default::default()
