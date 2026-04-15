@@ -229,3 +229,48 @@ impl Drop for SniperLock {
         let _ = fs::remove_file(&self.lock_path);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use std::fs;
+
+    #[test]
+    fn test_normalize_path_existing() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("existing.txt");
+        fs::write(&file_path, "content").unwrap();
+
+        let normalized = normalize_path(file_path.to_str().unwrap()).unwrap();
+        assert_eq!(normalized, file_path.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn test_normalize_path_new_file() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("new_file.txt");
+
+        let normalized = normalize_path(file_path.to_str().unwrap()).unwrap();
+        // Since new_file.txt does not exist, the fallback mechanism should use the canonicalized parent path
+        assert_eq!(normalized, dir.path().canonicalize().unwrap().join("new_file.txt"));
+    }
+
+    #[test]
+    fn test_normalize_path_missing_parent() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("missing_dir").join("new_file.txt");
+
+        let result = normalize_path(file_path.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("canonicalize parent of"));
+    }
+
+    #[test]
+    fn test_normalize_path_invalid_filename() {
+        let dir = TempDir::new().unwrap();
+        let invalid_path = dir.path().join("missing_dir").join("..");
+        let result = normalize_path(invalid_path.to_str().unwrap());
+        assert!(result.is_err());
+    }
+}
