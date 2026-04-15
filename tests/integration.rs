@@ -9,6 +9,34 @@ fn sniper() -> Command {
 }
 
 #[test]
+#[cfg(unix)]
+fn test_atomic_write_preserves_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let file_path = dir.path().join("script.sh");
+    fs::write(&file_path, "echo 'hello'\n").unwrap();
+
+    let mut perms = fs::metadata(&file_path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&file_path, perms).unwrap();
+
+    // Perform an atomic write (replace 'hello' with 'world')
+    // 'world' -> '776f726c64'
+    let status = sniper()
+        .args(&[file_path.to_str().unwrap(), "1", "1", "6563686f2027776f726c6427"]) // echo 'world'
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert_eq!(fs::read_to_string(&file_path).unwrap(), "echo 'world'\n");
+
+    // Verify permissions were preserved
+    let final_perms = fs::metadata(&file_path).unwrap().permissions();
+    assert_eq!(final_perms.mode() & 0o777, 0o755);
+}
+
+#[test]
 fn test_multi_step_undo_stack() {
     let dir = TempDir::new().unwrap();
     let file_path = dir.path().join("stack.txt");
