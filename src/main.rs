@@ -371,8 +371,18 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
     let mut total_inserted = 0usize;
 
     for op in &ops {
-        let s = op.start.saturating_sub(1);
-        let e = op.end.unwrap_or(op.start);
+        let start = op.start;
+        let end = op.end.unwrap_or(op.start);
+
+        if start < 1 || end > lines.len() + 1 || start > end + 1 {
+            return err(format!(
+                "line range {start}-{end} out of bounds (file has {} lines)",
+                lines.len()
+            ));
+        }
+
+        let s = start - 1;
+        let e = end;
 
         if op.delete.unwrap_or(false) {
             total_removed += lines.splice(s..e, std::iter::empty()).count();
@@ -682,6 +692,20 @@ mod tests {
         let r = cmd_manifest(&path, &manifest_path, false);
         assert_eq!(r.status, "error");
         assert!(r.message.as_deref().unwrap().contains("parse manifest"));
+    }
+
+    #[test]
+    fn test_cmd_manifest_out_of_bounds() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "test.txt", "a\nb\n");
+        let manifest_path = create_file(
+            &dir,
+            "ops.json",
+            r#"[{"start": 10, "end": 15, "delete": true}]"#,
+        );
+        let r = cmd_manifest(&path, &manifest_path, false);
+        assert_eq!(r.status, "error");
+        assert!(r.message.as_deref().unwrap().contains("out of bounds"));
     }
 
     // --- cmd_undo tests ---
