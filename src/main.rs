@@ -15,6 +15,14 @@
 //! Auto-indent: Detects expected indentation from context and prepends missing spaces
 //! Validate-indent: Warns if replacement lacks expected indentation (dry-run only)
 //! Dry-run: Shows actual diff preview with +/-/~ markers
+//!
+//! LINE NUMBERS: All line numbers are 1-based (first line is 1, not 0)
+//!
+//! CONFIGURATION (via environment variables):
+//! SNIPER_LOCK_TIMEOUT       Lock acquisition timeout in seconds (default: 30)
+//! SNIPER_MAX_FILE_SIZE      Maximum file size to edit, e.g., "100MB" (default: 100MB)
+//! SNIPER_BACKUP_RETENTION_COUNT  Number of backups to keep (default: 50)
+//! SNIPER_BACKUP_MAX_AGE_DAYS     Max age of backups in days (default: 30)
 
 use std::fs;
 use std::io::Read;
@@ -26,8 +34,8 @@ use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
 use diff::generate_preview;
 
 use moesniper::{
- create_backup, find_latest_backup, handle_backtrack_error, hex_decode, write_atomic,
- write_atomic_owned, SniperLock,
+    create_backup, find_latest_backup, handle_backtrack_error, hex_decode, write_atomic,
+    write_atomic_owned, SniperLock, SniperConfig, purge_old_backups, check_file_size,
 };
 
 fn main() {
@@ -242,24 +250,32 @@ fn cmd_encode(text: &str) -> CliResult {
 }
 
 fn cmd_splice(
- filepath: &str,
- start: usize,
- end: usize,
- content: &str,
- dry_run: bool,
- auto_indent: bool,
- validate_indent: bool,
+    filepath: &str,
+    start: usize,
+    end: usize,
+    content: &str,
+    dry_run: bool,
+    auto_indent: bool,
+    validate_indent: bool,
 ) -> CliResult {
- let _lock = match SniperLock::acquire(filepath) {
- Ok(l) => l,
- Err(e) => return err(e),
- };
+    // Load configuration
+    let config = SniperConfig::from_env();
+    
+    // Check file size before reading
+    if let Err(e) = check_file_size(filepath, config.max_file_size) {
+        return err(e);
+    }
 
- let text = match fs::read_to_string(filepath) {
- Ok(t) => t,
- Err(e) => return err(handle_backtrack_error(e, "Read")),
- };
- let lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
+    let _lock = match SniperLock::acquire_with_config(filepath, &config) {
+        Ok(l) => l,
+        Err(e) => return err(e),
+    };
+
+    let text = match fs::read_to_string(filepath) {
+        Ok(t) => t,
+        Err(e) => return err(handle_backtrack_error(e, "Read")),
+    };
+    let lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
  if start < 1 || end > lines.len() || start > end + 1 {
  if start == lines.len() + 1 && start == end + 1 {
@@ -359,12 +375,15 @@ fn cmd_splice(
  modified_lines.extend(new_lines);
  }
 
- let lines_refs: Vec<&str> = modified_lines.iter().map(|s| s.as_str()).collect();
- if let Err(e) = write_atomic(filepath, &lines_refs) {
- return err(e);
- }
+    let lines_refs: Vec<&str> = modified_lines.iter().map(|s| s.as_str()).collect();
+    if let Err(e) = write_atomic(filepath, &lines_refs) {
+        return err(e);
+    }
 
- let ai_hint = Some(if is_delete {
+    // Purge old backups according to retention policy
+    let _ = purge_old_backups(filepath, &config);
+
+    let ai_hint = Some(if is_delete {
  format!("verify: {} around line {}", filepath, start)
  } else {
  format!("verify: read {} lines {}-{}", filepath, start, end)
@@ -503,7 +522,8 @@ if !valid {
 }
 
 fn cmd_undo(filepath: &str) -> CliResult {
-    let _lock = match SniperLock::acquire(filepath) {
+    let config = SniperConfig::from_env();
+    let _lock = match SniperLock::acquire_with_config(filepath, &config) {
         Ok(l) => l,
         Err(e) => return err(e),
     };
@@ -848,17 +868,17 @@ mod tests {
 
     // --- edge case tests ---
 
-    #[test]
-    fn test_file_not_found() {
-        let r = cmd_splice("/tmp/no_such_file_12345.txt", 1, 1, "78", false, false, false);
-        assert_eq!(r.status, "error");
-        assert!(r
-            .message
-            .as_deref()
-            .unwrap()
-            .to_lowercase()
-            .contains("read"));
-    }
+#[test]
+fn test_file_not_found() {
+    let r = cmd_splice("/tmp/no_such_file_12345.txt", 1, 1, "78", false, false, false);
+    assert_eq!(r.status, "error");
+    let msg = r.message.as_deref().unwrap().to_lowercase();
+    assert!(
+        msg.contains("read") || msg.contains("metadata") || msg.contains("no such file"),
+        "expected file-related error, got: {}",
+        msg
+    );
+}
 
     #[test]
     fn test_cmd_splice_delete_last_line_preserves_non_termination_if_possible() {
