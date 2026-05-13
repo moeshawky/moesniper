@@ -236,6 +236,12 @@ fn write_atomic_impl<S: AsRef<str>>(
 ) -> Result<(), String> {
     let tmp = format!("{filepath}.sniper_tmp");
     let mut f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
+
+    if let Ok(metadata) = fs::metadata(filepath) {
+        let perms = metadata.permissions();
+        let _ = fs::set_permissions(&tmp, perms);
+    }
+
     for (i, line) in lines.iter().enumerate() {
         let s = line.as_ref();
         f.write_all(s.as_bytes())
