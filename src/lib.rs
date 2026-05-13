@@ -200,11 +200,6 @@ pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
     write_atomic_impl(filepath, lines, has_trailing_newline)
 }
 
-pub fn write_atomic_owned(filepath: &str, lines: &[String]) -> Result<(), String> {
-    let has_trailing_newline = check_trailing_newline(filepath)?;
-    write_atomic_impl(filepath, lines, has_trailing_newline)
-}
-
 fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = match fs::File::open(filepath) {
@@ -228,26 +223,37 @@ fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
     Ok(last_byte[0] == b'\n')
 }
 
+
 /// Unified atomic write with metabolic pacing via llmosafe 0.5.0.
+///
+/// Trailing newlines are stripped from each line, then:
+/// - All lines except the last get a newline appended
+/// - The last line gets a newline ONLY if the original file had one
+///
+/// This ensures deterministic behavior regardless of input format.
 fn write_atomic_impl<S: AsRef<str>>(
     filepath: &str,
     lines: &[S],
     has_trailing_newline: bool,
 ) -> Result<(), String> {
     let tmp = format!("{filepath}.sniper_tmp");
-    let mut f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
+    let f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
+    let mut f = std::io::BufWriter::new(f);
+    let num_lines = lines.len();
     for (i, line) in lines.iter().enumerate() {
-        let s = line.as_ref();
-        f.write_all(s.as_bytes())
-            .map_err(|e| format!("write: {e}"))?;
-
-        if !s.ends_with('\n') && (i < lines.len() - 1 || has_trailing_newline) {
+        let mut bytes = line.as_ref().as_bytes();
+        // Strip trailing newline from the line string to handle it uniformly
+        if bytes.ends_with(b"\n") {
+            bytes = &bytes[..bytes.len() - 1];
+        }
+        f.write_all(bytes).map_err(|e| format!("write: {e}"))?;
+        let is_last = i == num_lines - 1;
+        if !is_last || has_trailing_newline {
             f.write_all(b"\n")
                 .map_err(|e| format!("write newline: {e}"))?;
         }
     }
-    drop(f);
-
+    f.into_inner().map_err(|e| format!("flush: {e}"))?;
     // Metabolic Pacing: entropy-weighted sleep (256MB memory ceiling).
     let guard = ResourceGuard::new(256 * 1024 * 1024);
     let entropy = guard.raw_entropy();

@@ -35,7 +35,7 @@ use diff::generate_preview;
 
 use moesniper::{
     create_backup, find_latest_backup, handle_backtrack_error, hex_decode, write_atomic,
-    write_atomic_owned, SniperLock, SniperConfig, purge_old_backups, check_file_size,
+    SniperLock, SniperConfig, purge_old_backups, check_file_size,
 };
 
 fn main() {
@@ -497,7 +497,8 @@ if !valid {
  }
 
     if !dry_run {
-        if let Err(e) = write_atomic_owned(filepath, &lines) {
+        let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+    if let Err(e) = write_atomic(filepath, &lines_refs) {
             return err(e);
         }
     }
