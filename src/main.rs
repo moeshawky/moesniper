@@ -24,6 +24,8 @@
 //! SNIPER_BACKUP_RETENTION_COUNT  Number of backups to keep (default: 50)
 //! SNIPER_BACKUP_MAX_AGE_DAYS     Max age of backups in days (default: 30)
 
+mod help_text;
+
 use std::fs;
 use std::io::Read;
 
@@ -42,44 +44,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
- eprint!(concat!(
- "sniper — escape-proof precision file editor for LLM agents\n",
- "\n",
- "USAGE:\n",
- " sniper <file> <start> <end> <hex> Replace lines start-end with hex-decoded content\n",
- " sniper <file> <start> <end> --delete Delete lines start-end\n",
- " sniper <file> --manifest <path> Batch ops from JSON (applied bottom-up)\n",
- " sniper <file> --undo Restore from last backup (supports multi-step)\n",
- " sniper encode [--stdin | --file <p>] Output hex-encoded string (use --stdin for safety)\n",
- "\n",
- "FLAGS:\n",
- " --dry-run Preview changes with unified diff format\n",
- " --json Machine-readable JSON output\n",
- " --auto-indent Auto-detect and apply missing indentation\n",
- " --validate-indent Validate indentation matches context (dry-run only)\n",
- "\n",
- "ENCODING:\n",
- " cat code.rs | sniper encode --stdin\n",
- " sniper encode --file snippet.txt\n",
- "\n",
- "MANIFEST FORMAT:\n",
- " [{{\"start\": 42, \"end\": 45, \"hex\": \"6e6577\"}}, {{\"start\": 10, \"delete\": true}}]\n",
- " Operations applied bottom-up. Line numbers refer to original file.\n",
- "\n",
- "BACKUPS:\n",
- " Every edit creates .sniper/<path_hash>.<filename>.<timestamp>\n",
- " Undo restores the most recent backup and removes it from the stack.\n",
- "\n",
- "EXAMPLES:\n",
- " Replace line 5 with 'hello world':\n",
- " sniper file.rs 5 5 68656c6c6f20776f726c64\n",
- "\n",
- " Delete lines 10-20:\n",
- " sniper file.rs 10 20 --delete\n",
- "\n",
- " Undo last edit:\n",
- " sniper file.rs --undo\n",
- ));
+        eprint!("{}", help_text::HELP);
         std::process::exit(0);
     }
 
