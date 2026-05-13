@@ -892,10 +892,10 @@ fn test_file_not_found() {
         assert_eq!(r.status, "ok");
 
         let content = fs::read_to_string(&path).unwrap();
-        // Currently, it will be "a\n" because "a\n" was the first line from split_inclusive.
-        // If we want true precision, it should be "a".
+    // After PR #8: trailing newlines are stripped uniformly, then re-added based on original file.
+    // Original had no trailing newline, so result should be "a" (no trailing newline).
         // Let's see what it is currently.
-        assert_eq!(content, "a\n");
+    assert_eq!(content, "a");
     }
 
     #[test]

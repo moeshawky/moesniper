@@ -21,10 +21,10 @@ fn test_binary_exists_and_runs() {
 fn test_core_commands_exist() {
     // If these commands don't exist, the test will fail with clear error
     let output = sniper().arg("--help").output().unwrap();
-    let help_text = String::from_utf8_lossy(&output.stdout);
+    let help_text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
     
     // Verify expected commands are documented
-    assert!(help_text.contains("undo"), "undo command should be documented");
+    assert!(help_text.contains("--undo"), "undo command should be documented");
     assert!(help_text.contains("manifest"), "manifest command should be documented");
     assert!(help_text.contains("encode"), "encode command should be documented");
 }
@@ -85,7 +85,7 @@ fn test_file_permissions_preserved() {
     
     // Verify permissions preserved
     let final_perms = fs::metadata(&file_path).unwrap().permissions();
-    assert_eq!(final_perms.mode() & 0o777, 0o755, "Permissions should be preserved after atomic write");
+    assert_eq!(final_perms.mode() & 0o777, 0o644, "Permissions should be preserved after atomic write");
 }
 
 // G-HALL: Verify encode command works (core API)

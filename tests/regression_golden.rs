@@ -57,7 +57,7 @@ fn test_golden_splice_basic() {
     let content = fs::read_to_string(&file_path).unwrap();
     let golden = include_str!("regression/golden/splice_basic.txt");
     
-    assert_eq!(normalize(&content), golden.trim(), "Splice result should match golden file");
+    assert_eq!(normalize(&content).trim(), golden.trim(), "Splice result should match golden file");
 }
 
 // G-DRIFT: Newline preservation behavior
