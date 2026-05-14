@@ -1,6 +1,6 @@
 [package]
 name = "moesniper"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "Escape-proof precision file editor for LLM agents. Hex-encoded content, line-range splicing, atomic writes."
 license = "MIT"
