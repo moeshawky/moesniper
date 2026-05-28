@@ -224,7 +224,7 @@ fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
     Ok(last_byte[0] == b'\n')
 }
 
-/// Unified atomic write with metabolic pacing via llmosafe 0.5.0.
+/// Unified atomic write with metabolic pacing via llmosafe 0.6.2.
 ///
 /// Trailing newlines are stripped from each line, then:
 /// - All lines except the last get a newline appended
@@ -258,8 +258,11 @@ fn write_atomic_impl<S: AsRef<str>>(
         }
     }
     f.into_inner().map_err(|e| format!("flush: {e}"))?;
-    // Metabolic Pacing: entropy-weighted sleep (256MB memory ceiling).
-    let guard = ResourceGuard::new(256 * 1024 * 1024);
+    // Metabolic Pacing: entropy-weighted sleep with auto-scaled memory ceiling.
+    // ResourceGuard::auto(0.5) uses 50% of system memory as the safety ceiling,
+    // adapting to different deployment environments.
+    let guard = ResourceGuard::auto(0.5);
+    guard.check().map_err(|e| format!("resource safety: {e}"))?;
     let entropy = guard.raw_entropy();
     if entropy > 500 {
         thread::sleep(Duration::from_millis((entropy / 2) as u64));
@@ -272,9 +275,15 @@ fn write_atomic_impl<S: AsRef<str>>(
 }
 
 /// Centralized handling for llmosafe Backtrack Signal (-7).
+///
+/// In llmosafe 0.6.2+, resource exhaustion surfaces via `KernelError` from
+/// `ResourceGuard::check()` rather than OS signals on IO operations.
+/// This function remains as a defensive fallback — if the OS ever returns
+/// error code -7 (llmosafe's legacy DeadlineExceeded code) on an IO operation,
+/// it will be caught here.
 pub fn handle_backtrack_error(e: std::io::Error, context: &str) -> String {
     if e.raw_os_error() == Some(-7) {
-        format!("CRITICAL: {context} aborted via llmosafe 0.5.0 Backtrack Signal (-7). Immune memory triggered: current state matches a previously rolled-back failure pattern.")
+        format!("CRITICAL: {context} aborted via llmosafe Backtrack Signal (-7). Immune memory triggered: current state matches a previously rolled-back failure pattern.")
     } else {
         format!("{context}: {e}")
     }
