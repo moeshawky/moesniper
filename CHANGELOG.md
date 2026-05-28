@@ -5,7 +5,7 @@ All notable changes to moesniper will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0.html).
 
-## [0.5.1] - 2026-05-28
+## [0.6.0] - 2026-05-28
 
 ### Added
 
@@ -33,10 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 ### Changed
 
 - **llmosafe 0.5.0 → 0.6.2**: `ResourceGuard::auto(0.5)` replaces hardcoded 256MB ceiling, adapting to deployment environment. Added `ResourceGuard::check()` call before atomic rename for proper `KernelError` propagation.
-- **Dead code removal**: Removed `use_os_locking` config field and `SNIPER_USE_OS_LOCKING` env var (feature flag was parsed but never consumed — `flock()` was never implemented). Removed `libc` dependency (zero imports).
+- **Dead code removed**: Removed `use_os_locking` config field and `SNIPER_USE_OS_LOCKING` env var (feature flag was parsed but never consumed — `flock()` was never implemented). Removed `libc` dependency (zero imports).
 - **Clippy clean**: `field_reassign_with_default` fixed, `if_same_then_else` blocks merged, `is_multiple_of()` used instead of manual mod.
-- **Cargo.toml**: Added `rust-version = "1.70"` for MSRV discoverability.
-- **Documentation**: `CHANGELOG.md`, `README.md` rewritten with v0.5.1 feature coverage. Help text expanded with `--stdin`, `--validate-indent`, auto-indent, and env var reference. Root docs consolidated into `docs/`.
+- **MSRV**: 1.70 → 1.87 (`is_multiple_of` stabilized in Rust 1.87).
+- **Cargo.toml**: Added `rust-version = "1.87"` for MSRV discoverability.
+- **Documentation**: `CHANGELOG.md`, `README.md` rewritten with v0.6.0 feature coverage. Help text expanded with `--stdin`, `--validate-indent`, auto-indent, and env var reference. Root docs consolidated into `docs/`.
 
 ### Security
 
@@ -52,6 +53,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 - **CBP boundary audit**: 10 boundaries mapped, 3 low-severity accepted findings, zero compound cascades.
 - **Publish signal**: GREEN — `cargo publish --dry-run` passes, 171 tests, 0 failures.
 - **WD-40 cleanup**: Workspace 1.2GB → 362MB. Removed `libc` dead dep, `target/` build artifacts, `.sniper/` 25K backup files, `.ix/` search cache.
+
+---
+
+## [0.5.1] - 2026-05-14
+
+### Added
+- Comprehensive test suite: 85+ tests organized by failure mode (smoke, edge case, property-based, golden regression).
+- Test documentation (`tests/README.md`).
+
+### Changed
+- Help text extracted to `src/help_text.rs` with improved organization.
+- Documentation improvements.
 
 ---
 
@@ -129,7 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 
 | Version | Date | Key Feature |
 |---------|------|-------------|
-| 0.5.1 | 2026-05-28 | Indent engine, PID locks, CBP hardening, llmosafe 0.6.2, 171 tests |
+| 0.6.0 | 2026-05-28 | Indent engine, PID locks, CBP hardening, llmosafe 0.6.2, 171 tests |
+| 0.5.1 | 2026-05-14 | Test suite expansion, help text refactor |
 | 0.5.0 | 2026-05-14 | Enterprise security + auto-indent + dry-run |
 | 0.4.0 | 2025-04-22 | Manifest operations + multi-step undo |
 | 0.3.0 | 2025-04-21 | Basic splicing + hex encoding |
