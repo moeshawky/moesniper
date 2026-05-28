@@ -47,7 +47,7 @@ Following the `llm-testing-patterns` skill methodology, added comprehensive test
   - Cascade detection guide
 
 #### Documentation
-- **TEST_IMPROVEMENTS.md**: Detailed guide to test suite improvements, coverage matrix, and cascade detection protocol
+- **docs/TEST_IMPROVEMENTS.md**: Detailed guide to test suite improvements, coverage matrix, and cascade detection protocol
 
 ### Changed
 
