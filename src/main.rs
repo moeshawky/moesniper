@@ -241,12 +241,10 @@ fn cmd_splice(
     let config = SniperConfig::from_env();
 
     // Validate path before any file operations
-    let _validated = match normalize_path(filepath) {
-        Ok(p) => p,
-        Err(e) => return err(e),
-    };
+    if let Err(e) = normalize_path(filepath) {
+        return err(e);
+    }
 
-    // Check file size on validated path
     if let Err(e) = check_file_size(filepath, config.max_file_size) {
         return err(e);
     }
@@ -426,10 +424,9 @@ fn cmd_manifest_impl(
     let config = SniperConfig::from_env();
 
     // Validate path before any file operations
-    let _validated = match normalize_path(filepath) {
-        Ok(p) => p,
-        Err(e) => return err(e),
-    };
+    if let Err(e) = normalize_path(filepath) {
+        return err(e);
+    }
 
     if let Err(e) = check_file_size(filepath, config.max_file_size) {
         return err(e);

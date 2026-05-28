@@ -208,7 +208,7 @@ pub fn detect_expected_indent(
             best_quality = quality;
 
             // Perfect match: indent is an exact multiple — stop scanning
-            if leading % step == 0 {
+            if leading.is_multiple_of(step) {
                 break;
             }
         }
@@ -221,12 +221,10 @@ pub fn detect_expected_indent(
         let trimmed = line.trim_end();
         let trimmed_no_comment = strip_trailing_comment(trimmed);
 
-        // Block opener: `{`, `:` → expect indent increase for content AFTER this line
-        if trimmed_no_comment.ends_with('{') || trimmed_no_comment.ends_with(':') {
-            context_level += 1;
-        }
-        // Continuation opener: line ends with `(`, `[`, `,` → more indent
-        else if trimmed_no_comment.ends_with('(')
+        // Block/continuation opener: `{`, `:`, `(`, `[`, `,` → expect indent increase
+        if trimmed_no_comment.ends_with('{')
+            || trimmed_no_comment.ends_with(':')
+            || trimmed_no_comment.ends_with('(')
             || trimmed_no_comment.ends_with('[')
             || trimmed_no_comment.ends_with(',')
         {
