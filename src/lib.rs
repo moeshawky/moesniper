@@ -401,9 +401,11 @@ mod tests {
         let _ = fs::write(&file, "test");
 
         // Create config with retention of 3
-        let mut config = SniperConfig::default();
-        config.backup_retention_count = 3;
-        config.backup_max_age_days = 0; // Disable age-based purge
+        let config = SniperConfig {
+            backup_retention_count: 3,
+            backup_max_age_days: 0,
+            ..SniperConfig::default()
+        };
 
         // Create multiple backups
         for _ in 0..5 {

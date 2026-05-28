@@ -183,10 +183,12 @@ mod backup_retention_tests {
         let file = PathBuf::from("test_retention.txt");
         let _ = fs::write(&file, "v0");
 
-        let mut config = SniperConfig::default();
-        config.backup_retention_count = 3;
-        config.backup_max_age_days = 0; // Disable age-based purge
-        config.audit_enabled = false;
+        let config = SniperConfig {
+            backup_retention_count: 3,
+            backup_max_age_days: 0,
+            audit_enabled: false,
+            ..SniperConfig::default()
+        };
 
         // Create 5 backups
         for i in 0..5 {

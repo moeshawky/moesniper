@@ -85,8 +85,10 @@ fn test_stale_lock_cleaned_on_timeout() {
     write!(lock_file, "garbage_content_not_a_pid").unwrap();
     drop(lock_file);
 
-    let mut config = SniperConfig::default();
-    config.lock_timeout = Duration::from_secs(2);
+    let config = SniperConfig {
+        lock_timeout: Duration::from_secs(2),
+        ..SniperConfig::default()
+    };
     // With garbage content, stale lock detection can't parse PID → should timeout normally
     let result = SniperLock::acquire_with_config(file_str, &config);
     assert!(
@@ -521,10 +523,12 @@ fn test_concurrent_backup_and_purge() {
     }
 
     // Purge with retention of 2
-    let mut config = SniperConfig::default();
-    config.backup_retention_count = 2;
-    config.backup_max_age_days = 0;
-    config.audit_enabled = false;
+    let config = SniperConfig {
+        backup_retention_count: 2,
+        backup_max_age_days: 0,
+        audit_enabled: false,
+        ..SniperConfig::default()
+    };
 
     let result = purge_old_backups(file_str, &config);
     assert!(result.is_ok(), "Purge must succeed: {:?}", result.err());

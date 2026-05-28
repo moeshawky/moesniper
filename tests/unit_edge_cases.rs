@@ -11,7 +11,7 @@ fn create_test_file(content: &str) -> (TempDir, std::path::PathBuf) {
 
 #[test]
 fn test_edge_case_empty_file() {
-    let (dir, file_path) = create_test_file("");
+    let (_dir, file_path) = create_test_file("");
     let output = std::process::Command::new("cargo")
         .args([
             "run",
@@ -30,7 +30,7 @@ fn test_edge_case_empty_file() {
 
 #[test]
 fn test_edge_case_single_char() {
-    let (dir, file_path) = create_test_file("x");
+    let (_dir, file_path) = create_test_file("x");
     let _ = std::process::Command::new("cargo")
         .args([
             "run",
@@ -48,7 +48,7 @@ fn test_edge_case_single_char() {
 #[test]
 fn test_edge_case_very_long_line() {
     let long_content = "x".repeat(100_000);
-    let (dir, file_path) = create_test_file(&long_content);
+    let (_dir, file_path) = create_test_file(&long_content);
     let output = std::process::Command::new("cargo")
         .args([
             "run",
@@ -67,7 +67,7 @@ fn test_edge_case_very_long_line() {
 
 #[test]
 fn test_edge_case_unicode() {
-    let (dir, file_path) = create_test_file("مرحبا");
+    let (_dir, file_path) = create_test_file("مرحبا");
     let output = std::process::Command::new("cargo")
         .args([
             "run",
@@ -86,7 +86,7 @@ fn test_edge_case_unicode() {
 
 #[test]
 fn test_edge_case_line_zero() {
-    let (dir, file_path) = create_test_file("test\n");
+    let (_dir, file_path) = create_test_file("test\n");
     let output = std::process::Command::new("cargo")
         .args([
             "run",
@@ -104,7 +104,7 @@ fn test_edge_case_line_zero() {
 
 #[test]
 fn test_edge_case_beyond_eof() {
-    let (dir, file_path) = create_test_file("line1\n");
+    let (_dir, file_path) = create_test_file("line1\n");
     let output = std::process::Command::new("cargo")
         .args([
             "run",
