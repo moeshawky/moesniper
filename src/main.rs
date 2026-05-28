@@ -36,8 +36,8 @@ use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
 use diff::generate_preview;
 
 use moesniper::{
-    create_backup, find_latest_backup, handle_backtrack_error, hex_decode, write_atomic,
-    SniperLock, SniperConfig, purge_old_backups, check_file_size,
+    check_file_size, create_backup, find_latest_backup, handle_backtrack_error, hex_decode,
+    normalize_path, purge_old_backups, write_atomic, SniperConfig, SniperLock,
 };
 
 fn main() {
@@ -225,8 +225,14 @@ fn cmd_splice(
 ) -> CliResult {
     // Load configuration
     let config = SniperConfig::from_env();
-    
-    // Check file size before reading
+
+    // Validate path before any file operations
+    let _validated = match normalize_path(filepath) {
+        Ok(p) => p,
+        Err(e) => return err(e),
+    };
+
+    // Check file size on validated path
     if let Err(e) = check_file_size(filepath, config.max_file_size) {
         return err(e);
     }
@@ -386,7 +392,19 @@ fn cmd_manifest(filepath: &str, manifest_path: &str, dry_run: bool, auto_indent:
 }
 
 fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool, auto_indent: bool, validate_indent: bool) -> CliResult {
-    let _lock = match SniperLock::acquire(filepath) {
+    let config = SniperConfig::from_env();
+
+    // Validate path before any file operations
+    let _validated = match normalize_path(filepath) {
+        Ok(p) => p,
+        Err(e) => return err(e),
+    };
+
+    if let Err(e) = check_file_size(filepath, config.max_file_size) {
+        return err(e);
+    }
+
+    let _lock = match SniperLock::acquire_with_config(filepath, &config) {
         Ok(l) => l,
         Err(e) => return err(e),
     };
@@ -395,6 +413,14 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool, auto_indent:
         Ok(o) => o,
         Err(e) => return err(format!("parse manifest: {e}")),
     };
+
+    for op in &ops {
+        if let Some(ref hex) = op.hex {
+            if let Err(e) = hex_decode(hex) {
+                return err(format!("hex decode in manifest: {e}"));
+            }
+        }
+    }
 
     let text = match fs::read_to_string(filepath) {
         Ok(t) => t,
@@ -423,10 +449,7 @@ for op in &ops {
  if op.delete.unwrap_or(false) {
  total_removed += lines.splice(s..e, std::iter::empty()).count();
  } else if let Some(ref hex) = op.hex {
- let content = match hex_decode(hex) {
- Ok(c) => c,
- Err(e) => return err(format!("hex decode in manifest: {e}")),
- };
+ let content = hex_decode(hex).unwrap(); // Pre-validated above
 
  // Apply auto-indent if needed
  let final_content = if auto_indent && needs_indent_fix(&lines, op.start, e, &content) {
@@ -466,6 +489,7 @@ if !valid {
     if let Err(e) = write_atomic(filepath, &lines_refs) {
             return err(e);
         }
+        let _ = purge_old_backups(filepath, &config);
     }
 
     let ai_hint = Some(format!(

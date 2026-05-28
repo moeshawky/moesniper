@@ -22,7 +22,7 @@ fn test_golden_undo_stack() {
     let dir = TempDir::new().unwrap();
     let file_path = dir.path().join("test.txt");
     fs::write(&file_path, "v0\n").unwrap();
-    
+
     // Make 5 edits
     for i in 1..=5 {
         let hex = format!("{:02x}", i + 48);
@@ -32,12 +32,14 @@ fn test_golden_undo_stack() {
             .unwrap();
         assert!(status.success());
     }
-    
+
     let content = fs::read_to_string(&file_path).unwrap();
-    let golden = include_str!("regression/golden/undo_stack.txt");
-    
-    // After 5 edits, content should be "5\n"
-    assert_eq!(normalize(&content), "5\n", "Content after edits should match golden");
+    let golden = normalize(include_str!("regression/golden/undo_stack.txt"));
+
+    assert_eq!(
+        normalize(&content), golden,
+        "Content after 5 edits must match golden file"
+    );
 }
 
 // G-DRIFT: Basic splice operation
@@ -46,18 +48,21 @@ fn test_golden_splice_basic() {
     let dir = TempDir::new().unwrap();
     let file_path = dir.path().join("test.txt");
     fs::write(&file_path, "line1\nline2\nline3\n").unwrap();
-    
+
     let status = sniper()
         .args([&file_path.to_string_lossy(), "1", "1", "58"]) // 'X'
         .status()
         .unwrap();
-    
+
     assert!(status.success());
-    
+
     let content = fs::read_to_string(&file_path).unwrap();
     let golden = include_str!("regression/golden/splice_basic.txt");
-    
-    assert_eq!(normalize(&content).trim(), golden.trim(), "Splice result should match golden file");
+
+    assert_eq!(
+        normalize(&content), normalize(golden),
+        "Splice result must byte-match golden file"
+    );
 }
 
 // G-DRIFT: Newline preservation behavior
@@ -74,11 +79,20 @@ fn test_golden_newline_preservation() {
         .status()
         .unwrap();
     
-    if status.success() {
-        let content = fs::read_to_string(&file_path).unwrap();
-        // Should preserve trailing newline
-        assert!(content.ends_with('\n'), "Should preserve trailing newline");
-    }
+    assert!(
+        status.success(),
+        "Splice must succeed on valid input"
+    );
+    let content = fs::read_to_string(&file_path).unwrap();
+    assert!(
+        content.ends_with('\n'),
+        "Must preserve trailing newline, got: {:?}",
+        content
+    );
+    assert_eq!(
+        content, "A\n",
+        "Content must be 'A\\n' after replacing 'test' with 'A'"
+    );
 }
 
 // G-DRIFT: Manifest operation baseline
@@ -112,19 +126,26 @@ fn test_golden_error_format() {
     let dir = TempDir::new().unwrap();
     let file_path = dir.path().join("test.txt");
     fs::write(&file_path, "test\n").unwrap();
-    
-    // Invalid line range should produce consistent error
+
     let output = sniper()
         .args([&file_path.to_string_lossy(), "0", "0", "41"])
         .output()
         .unwrap();
-    
-    assert!(!output.status.success(), "Should fail on invalid line");
-    
+
+    assert!(!output.status.success(), "Line 0 must be rejected");
+
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // Error should mention the problem
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let combined = format!("{}{}", stdout, stderr);
+
     assert!(
-        stderr.contains("line") || stderr.contains("range") || stderr.contains("bounds"),
-        "Error should mention line/range/bounds issue"
+        combined.contains("out of bounds"),
+        "Error must mention 'out of bounds', got: {}",
+        combined
+    );
+    assert!(
+        combined.contains("0-0") || combined.contains("0"),
+        "Error must reference the invalid line number, got: {}",
+        combined
     );
 }

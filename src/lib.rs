@@ -236,7 +236,11 @@ fn write_atomic_impl<S: AsRef<str>>(
     lines: &[S],
     has_trailing_newline: bool,
 ) -> Result<(), String> {
-    let tmp = format!("{filepath}.sniper_tmp");
+    let ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = format!("{filepath}.sniper_tmp.{ts}");
     let f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
     let mut f = std::io::BufWriter::new(f);
     let num_lines = lines.len();
@@ -276,9 +280,21 @@ pub fn handle_backtrack_error(e: std::io::Error, context: &str) -> String {
     }
 }
 
-/// File-based lock with configurable timeout.
+/// File-based lock with configurable timeout and stale lock detection.
 pub struct SniperLock {
     lock_path: PathBuf,
+}
+
+/// Check if a process with the given PID is alive.
+#[cfg(unix)]
+fn is_process_alive(pid: u32) -> bool {
+    use std::path::Path;
+    Path::new(&format!("/proc/{}", pid)).exists()
+}
+
+#[cfg(not(unix))]
+fn is_process_alive(_pid: u32) -> bool {
+    true
 }
 
 impl SniperLock {
@@ -305,9 +321,21 @@ impl SniperLock {
                 .create_new(true)
                 .open(&lock_path)
             {
-                Ok(_) => return Ok(Self { lock_path }),
+                Ok(mut f) => {
+                    let pid = std::process::id();
+                    let _ = write!(f, "{}", pid);
+                    return Ok(Self { lock_path });
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     if start.elapsed().unwrap_or(Duration::ZERO) > timeout {
+                        if let Ok(content) = fs::read_to_string(&lock_path) {
+                            if let Ok(pid) = content.trim().parse::<u32>() {
+                                if !is_process_alive(pid) {
+                                    let _ = fs::remove_file(&lock_path);
+                                    continue;
+                                }
+                            }
+                        }
                         return Err(format!(
                             "timeout: another sniper process is editing {} (lock held for >{:?})",
                             filepath, timeout
