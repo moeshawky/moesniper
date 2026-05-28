@@ -17,8 +17,6 @@ pub struct SniperConfig {
     pub backup_retention_count: usize,
     /// Age in days after which backups are purged. 0 means no age limit.
     pub backup_max_age_days: u64,
-    /// Whether to use OS-level file locking (flock) instead of spin-lock.
-    pub use_os_locking: bool,
     /// Whether to enable audit logging.
     pub audit_enabled: bool,
 }
@@ -30,7 +28,6 @@ impl Default for SniperConfig {
             max_file_size: 100 * 1024 * 1024, // 100 MB
             backup_retention_count: 50,
             backup_max_age_days: 30,
-            use_os_locking: false, // Keep compatibility by default
             audit_enabled: true,
         }
     }
@@ -65,11 +62,6 @@ impl SniperConfig {
             if let Ok(days) = val.parse::<u64>() {
                 config.backup_max_age_days = days;
             }
-        }
-
-        // OS-level locking: SNIPER_USE_OS_LOCKING
-        if env::var("SNIPER_USE_OS_LOCKING").is_ok() {
-            config.use_os_locking = true;
         }
 
         // Disable audit: SNIPER_DISABLE_AUDIT
@@ -119,7 +111,6 @@ mod tests {
         assert_eq!(config.max_file_size, 100 * 1024 * 1024);
         assert_eq!(config.backup_retention_count, 50);
         assert_eq!(config.backup_max_age_days, 30);
-        assert!(!config.use_os_locking);
         assert!(config.audit_enabled);
     }
 

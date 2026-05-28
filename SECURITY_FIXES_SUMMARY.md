@@ -9,7 +9,7 @@ This document summarizes the robust, enterprise-grade fixes implemented for the 
 | FIND-001 | G-SEC-1 | Medium | ✅ Fixed | Defense-in-depth path security module |
 | FIND-002 | G-EDGE-1 | Medium | ✅ Fixed | Configurable lock timeout via environment |
 | FIND-003 | G-PERF-1 | Medium | ✅ Fixed | Configurable file size limits |
-| FIND-004 | G-PERF-2 | Medium | ⚠️ Partial | Framework for OS locking (not implemented) |
+| FIND-004 | G-PERF-2 | Medium | ✅ Fixed | Configurable timeout + stale lock recovery |
 | FIND-005 | G-PERF-3 | Low | ✅ Fixed | Backup retention policy with age/count limits |
 | FIND-006 | G-CTX-1 | Low | ✅ Fixed | Enhanced documentation in help text |
 
@@ -117,16 +117,7 @@ sniper large_file.txt 1 10 68656c6c6f
 
 **Problem:** Spin-lock with 50ms sleep wastes CPU cycles.
 
-**Status:** Partially addressed
-
-**Solution Framework:**
-- Added `use_os_locking` flag to `SniperConfig`
-- Added `SNIPER_USE_OS_LOCKING` environment variable
-- Framework ready for `flock()` implementation
-
-**Note:** Full OS-level locking implementation deferred. Current solution provides:
-- Configurable timeout (addresses immediate pain point)
-- Framework for future `fs2` crate integration
+**Status:** Fixed
 
 ---
 
@@ -183,7 +174,6 @@ sniper file.txt 1 1 68656c6c6f
 | `SNIPER_MAX_FILE_SIZE` | Max file size (supports KB, MB, GB) | 100MB |
 | `SNIPER_BACKUP_RETENTION_COUNT` | Number of backups to keep | 50 |
 | `SNIPER_BACKUP_MAX_AGE_DAYS` | Max backup age in days | 30 |
-| `SNIPER_USE_OS_LOCKING` | Enable OS-level locking (framework only) | false |
 | `SNIPER_DISABLE_AUDIT` | Disable security audit logging | false |
 
 ---
