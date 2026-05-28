@@ -33,18 +33,18 @@ fn prop_encode_decode_roundtrip() {
             .stderr(std::process::Stdio::null())
             .spawn()
             .expect("Failed to spawn encode");
-        
+
         use std::io::Write;
         let mut encode_proc = encode_output;
         {
             let mut stdin = encode_proc.stdin.take().expect("Failed to open stdin");
             stdin.write_all(input.as_bytes()).expect("Failed to write");
         }
-        
+
         let result = encode_proc.wait_with_output().expect("Failed to read output");
         if result.status.success() {
             let hex = String::from_utf8_lossy(&result.stdout).trim().to_string();
-            
+
             // The encoded form should decode back to original
             // (This is a basic sanity check - full roundtrip would need decode command)
             prop_assert!(!hex.is_empty() || input.is_empty());
@@ -60,20 +60,20 @@ fn prop_undo_restores_content() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("test.txt");
         fs::write(&file_path, &content).unwrap();
-        
+
         // Make an edit
         let edit_success = run_sniper(
             &file_path.to_string_lossy(),
             "1", "1", &replacement
         );
-        
+
         if edit_success {
             // Undo should restore original
             let undo_output = std::process::Command::new("cargo")
                 .args(["run", "--quiet", "--", &file_path.to_string_lossy(), "--undo"])
                 .output()
                 .expect("Failed to execute undo");
-            
+
             if undo_output.status.success() {
                 let restored = fs::read_to_string(&file_path).unwrap();
                 // After undo, content should match original (or be in backup)
@@ -91,12 +91,12 @@ fn prop_line_zero_always_fails() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("test.txt");
         fs::write(&file_path, &content).unwrap();
-        
+
         let output = std::process::Command::new("cargo")
             .args(["run", "--quiet", "--", &file_path.to_string_lossy(), "0", "0", "41"])
             .output()
             .expect("Failed to execute");
-        
+
         // Line 0 should always be invalid
         prop_assert!(!output.status.success());
     });
@@ -111,12 +111,12 @@ fn prop_file_stays_nonempty_after_edit() {
         let file_path = dir.path().join("test.txt");
         let original = format!("{}\n", line_content);
         fs::write(&file_path, &original).unwrap();
-        
+
         // Make a valid edit
         run_sniper(&file_path.to_string_lossy(), "1", "1", "58"); // 'X'
-        
+
         let new_content = fs::read_to_string(&file_path).unwrap_or_default();
-        
+
         // File should still be non-empty
         prop_assert!(!new_content.is_empty());
     });
@@ -130,12 +130,12 @@ fn prop_no_corruption_on_failure() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("test.txt");
         fs::write(&file_path, &content).unwrap();
-        
+
         // Try invalid operation (line 999)
         let _ = std::process::Command::new("cargo")
             .args(["run", "--quiet", "--", &file_path.to_string_lossy(), "999", "999", "41"])
             .output();
-        
+
         // File should be unchanged or in backup
         let after_content = fs::read_to_string(&file_path).unwrap_or_default();
         prop_assert!(after_content == content || after_content.is_empty());

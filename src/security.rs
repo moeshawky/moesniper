@@ -21,7 +21,7 @@ pub struct SecurityPolicy {
 impl Default for SecurityPolicy {
     fn default() -> Self {
         Self {
-            base_dir: None, // No base restriction by default (backward compatible)
+            base_dir: None,           // No base restriction by default (backward compatible)
             reject_parent_refs: true, // Always reject parent refs
         }
     }
@@ -42,7 +42,11 @@ impl std::fmt::Display for PathSecurityError {
                 write!(f, "Parent reference not allowed: {}", component)
             }
             PathSecurityError::EscapesBaseDirectory { path, base } => {
-                write!(f, "Path escapes base directory: {:?} (base: {:?})", path, base)
+                write!(
+                    f,
+                    "Path escapes base directory: {:?} (base: {:?})",
+                    path, base
+                )
             }
             PathSecurityError::IoError(e) => {
                 write!(f, "IO error: {}", e)
@@ -60,21 +64,20 @@ pub fn validate_path<P: AsRef<Path>>(
 ) -> Result<PathBuf, PathSecurityError> {
     let path = path.as_ref();
 
-// Layer 1: Check for parent references
-for component in path.components() {
-    if component == Component::ParentDir && policy.reject_parent_refs {
-        return Err(PathSecurityError::ParentReferenceNotAllowed {
-            component: "..".to_string(),
-        });
+    // Layer 1: Check for parent references
+    for component in path.components() {
+        if component == Component::ParentDir && policy.reject_parent_refs {
+            return Err(PathSecurityError::ParentReferenceNotAllowed {
+                component: "..".to_string(),
+            });
+        }
     }
-}
 
     // Layer 2: Base directory containment (only if configured)
     let base_dir = policy.base_dir.as_ref();
-    
+
     let canonical = if path.exists() {
-        fs::canonicalize(path)
-            .map_err(|e| PathSecurityError::IoError(e.to_string()))?
+        fs::canonicalize(path).map_err(|e| PathSecurityError::IoError(e.to_string()))?
     } else if let Some(base) = base_dir {
         // For non-existent files with base_dir, resolve against base
         let resolved = base.join(path);
@@ -85,10 +88,9 @@ for component in path.components() {
     };
 
     if let Some(base) = base_dir {
-        let canonical_base = base.canonicalize()
-            .map_err(|e| PathSecurityError::IoError(format!(
-                "Failed to canonicalize base directory: {}", e
-            )))?;
+        let canonical_base = base.canonicalize().map_err(|e| {
+            PathSecurityError::IoError(format!("Failed to canonicalize base directory: {}", e))
+        })?;
 
         if !canonical.starts_with(&canonical_base) {
             return Err(PathSecurityError::EscapesBaseDirectory {
@@ -128,17 +130,13 @@ fn clean_path(path: &Path) -> PathBuf {
 }
 
 /// Secure version of normalize_path.
-pub fn normalize_path_secure(
-    path: &str,
-    base_dir: Option<&Path>,
-) -> Result<PathBuf, String> {
+pub fn normalize_path_secure(path: &str, base_dir: Option<&Path>) -> Result<PathBuf, String> {
     let policy = SecurityPolicy {
         base_dir: base_dir.map(|p| p.to_path_buf()),
         ..SecurityPolicy::default()
     };
-    
-    validate_path(path, &policy)
-        .map_err(|e| e.to_string())
+
+    validate_path(path, &policy).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -201,10 +199,7 @@ mod tests {
     fn test_normalize_path_secure_rejects_traversal() {
         let dir = TempDir::new().unwrap();
 
-        let result = normalize_path_secure(
-            "../../../etc/passwd",
-            Some(dir.path())
-        );
+        let result = normalize_path_secure("../../../etc/passwd", Some(dir.path()));
         assert!(result.is_err());
     }
 

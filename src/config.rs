@@ -89,19 +89,19 @@ impl SniperConfig {
 /// Parse size string with optional suffix (KB, MB, GB).
 fn parse_size(s: &str) -> Option<u64> {
     let s = s.trim().to_uppercase();
-    
+
     // Check for suffix
     if s.ends_with("GB") {
-        let num = s[..s.len()-2].trim().parse::<u64>().ok()?;
+        let num = s[..s.len() - 2].trim().parse::<u64>().ok()?;
         Some(num * 1024 * 1024 * 1024)
     } else if s.ends_with("MB") {
-        let num = s[..s.len()-2].trim().parse::<u64>().ok()?;
+        let num = s[..s.len() - 2].trim().parse::<u64>().ok()?;
         Some(num * 1024 * 1024)
     } else if s.ends_with("KB") {
-        let num = s[..s.len()-2].trim().parse::<u64>().ok()?;
+        let num = s[..s.len() - 2].trim().parse::<u64>().ok()?;
         Some(num * 1024)
     } else if s.ends_with("B") {
-        s[..s.len()-1].trim().parse::<u64>().ok()
+        s[..s.len() - 1].trim().parse::<u64>().ok()
     } else {
         // Plain number (bytes)
         s.parse::<u64>().ok()

@@ -37,7 +37,8 @@ fn test_golden_undo_stack() {
     let golden = normalize(include_str!("regression/golden/undo_stack.txt"));
 
     assert_eq!(
-        normalize(&content), golden,
+        normalize(&content),
+        golden,
         "Content after 5 edits must match golden file"
     );
 }
@@ -60,7 +61,8 @@ fn test_golden_splice_basic() {
     let golden = include_str!("regression/golden/splice_basic.txt");
 
     assert_eq!(
-        normalize(&content), normalize(golden),
+        normalize(&content),
+        normalize(golden),
         "Splice result must byte-match golden file"
     );
 }
@@ -70,19 +72,16 @@ fn test_golden_splice_basic() {
 fn test_golden_newline_preservation() {
     let dir = TempDir::new().unwrap();
     let file_path = dir.path().join("test.txt");
-    
+
     // File with trailing newline
     fs::write(&file_path, "test\n").unwrap();
-    
+
     let status = sniper()
         .args([&file_path.to_string_lossy(), "1", "1", "41"]) // 'A'
         .status()
         .unwrap();
-    
-    assert!(
-        status.success(),
-        "Splice must succeed on valid input"
-    );
+
+    assert!(status.success(), "Splice must succeed on valid input");
     let content = fs::read_to_string(&file_path).unwrap();
     assert!(
         content.ends_with('\n'),
@@ -101,18 +100,22 @@ fn test_golden_manifest_basic() {
     let dir = TempDir::new().unwrap();
     let file_path = dir.path().join("test.txt");
     let manifest_path = dir.path().join("ops.json");
-    
+
     fs::write(&file_path, "line1\nline2\nline3\n").unwrap();
     fs::write(&manifest_path, r#"[{"start": 2, "delete": true}]"#).unwrap();
-    
+
     let status = sniper()
-        .args([&file_path.to_string_lossy(), "--manifest", &manifest_path.to_string_lossy()])
+        .args([
+            &file_path.to_string_lossy(),
+            "--manifest",
+            &manifest_path.to_string_lossy(),
+        ])
         .status()
         .unwrap();
-    
+
     // Should succeed
     assert!(status.success(), "Manifest operation should succeed");
-    
+
     let content = fs::read_to_string(&file_path).unwrap();
     // After deleting line 2, should have "line1\nline3\n"
     assert!(content.contains("line1"), "Should keep line 1");

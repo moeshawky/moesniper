@@ -3,9 +3,9 @@ use std::process::Command;
 use tempfile::TempDir;
 
 fn sniper() -> Command {
- let mut cmd = Command::new("cargo");
- cmd.args(["run", "--quiet", "--"]);
- cmd
+    let mut cmd = Command::new("cargo");
+    cmd.args(["run", "--quiet", "--"]);
+    cmd
 }
 
 #[test]
@@ -14,15 +14,15 @@ fn test_multi_step_undo_stack() {
     let file_path = dir.path().join("stack.txt");
     fs::write(&file_path, "v0\n").unwrap();
 
- // 5 edits
- for i in 1..=5 {
- let hex = format!("{:02x}", i + 48); // '1', '2', etc.
- let status = sniper()
- .args([file_path.to_str().unwrap(), "1", "1", &hex])
- .status()
- .unwrap();
- assert!(status.success());
- }
+    // 5 edits
+    for i in 1..=5 {
+        let hex = format!("{:02x}", i + 48); // '1', '2', etc.
+        let status = sniper()
+            .args([file_path.to_str().unwrap(), "1", "1", &hex])
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
 
     assert_eq!(fs::read_to_string(&file_path).unwrap(), "5\n");
 
@@ -87,18 +87,21 @@ fn test_encode_stdin_integrity() {
         .unwrap();
 
     use std::io::Write;
-    let mut stdin = child.stdin.take().expect("stdin should be captured by Stdio::piped");
+    let mut stdin = child
+        .stdin
+        .take()
+        .expect("stdin should be captured by Stdio::piped");
     stdin.write_all(input.as_bytes()).unwrap();
     drop(stdin);
 
     let output = child.wait_with_output().unwrap();
     let hex = String::from_utf8(output.stdout).unwrap().trim().to_string();
 
- // Check roundtrip - dummy call to verify it runs
- let _ = sniper()
- .args(["encode", "--stdin"])
- .stdin(std::process::Stdio::piped())
- .status();
+    // Check roundtrip - dummy call to verify it runs
+    let _ = sniper()
+        .args(["encode", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .status();
 
     let expected_hex: String = input
         .as_bytes()

@@ -177,7 +177,11 @@ pub fn detect_expected_indent(
     _end_line: usize,
 ) -> (IndentStyle, usize) {
     let style = detect_indent_style(all_lines);
-    let step = if style.uses_tabs { 1 } else { style.spaces.max(1) };
+    let step = if style.uses_tabs {
+        1
+    } else {
+        style.spaces.max(1)
+    };
 
     let s = start_line.saturating_sub(1);
     let scan_start = s.saturating_sub(MAX_SCAN_BACK);
@@ -261,7 +265,13 @@ fn context_quality(leading: usize, step: usize, _line: &str) -> i32 {
         return 0;
     }
     let remainder = leading % step;
-    let base = if remainder == 0 { 10 } else if remainder <= 2 { 5 } else { 0 };
+    let base = if remainder == 0 {
+        10
+    } else if remainder <= 2 {
+        5
+    } else {
+        0
+    };
     // Bonus for deeper indentation: more reliable than top-level lines
     let depth_bonus = (leading / step).min(5) as i32;
     base + depth_bonus
@@ -334,7 +344,11 @@ pub fn validate_indentation(
         let warning = format!(
             "INDENTATION WARNING: Replacement has {} leading {}, expected {} (diff: {})",
             min_leading,
-            if style.uses_tabs { "tab(s)" } else { "space(s)" },
+            if style.uses_tabs {
+                "tab(s)"
+            } else {
+                "space(s)"
+            },
             style_desc,
             diff
         );
@@ -445,19 +459,14 @@ mod tests {
 
     #[test]
     fn test_detect_tabs_indent() {
-        let lines: Vec<String> = (0..50)
-            .map(|_| "\tfn foo() {".to_string())
-            .collect();
+        let lines: Vec<String> = (0..50).map(|_| "\tfn foo() {".to_string()).collect();
         let style = detect_indent_style(&lines);
         assert!(style.uses_tabs);
     }
 
     #[test]
     fn test_detect_2_space_indent() {
-        let lines = vec![
-            "  def foo():".to_string(),
-            "    pass".to_string(),
-        ];
+        let lines = vec!["  def foo():".to_string(), "    pass".to_string()];
         let style = detect_indent_style(&lines);
         assert_eq!(style.spaces, 2);
     }
@@ -528,20 +537,14 @@ mod tests {
 
     #[test]
     fn test_expected_indent_after_colon() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let (_, level) = detect_expected_indent(&all_lines, 2, 2);
         assert_eq!(level, 1);
     }
 
     #[test]
     fn test_expected_indent_after_brace() {
-        let all_lines = vec![
-            "fn main() {\n".to_string(),
-            "    let x = 1;\n".to_string(),
-        ];
+        let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
         let (_, level) = detect_expected_indent(&all_lines, 2, 2);
         assert_eq!(level, 1, "Content after `{{` should be indent level 1");
     }
@@ -564,10 +567,7 @@ mod tests {
 
     #[test]
     fn test_expected_indent_top_of_file() {
-        let all_lines = vec![
-            "fn main() {\n".to_string(),
-            "    let x = 1;\n".to_string(),
-        ];
+        let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
         let (_, level) = detect_expected_indent(&all_lines, 1, 1);
         assert_eq!(level, 0);
     }
@@ -620,7 +620,7 @@ mod tests {
     fn test_expected_indent_off_by_one_rounding() {
         let all_lines = vec![
             "fn main() {\n".to_string(),
-            "   let x = 1;\n".to_string(),  // 3 spaces, should be 4
+            "   let x = 1;\n".to_string(), // 3 spaces, should be 4
         ];
         let (_, level) = detect_expected_indent(&all_lines, 2, 2);
         assert_eq!(
@@ -636,12 +636,15 @@ mod tests {
             "fn main() {\n".to_string(),
             "    let a = 1;\n".to_string(),
             "    let b = 2;\n".to_string(),
-            "     let c = 3;\n".to_string(),  // 5 spaces — anomaly
-            "\n".to_string(),                  // blank
+            "     let c = 3;\n".to_string(), // 5 spaces — anomaly
+            "\n".to_string(),                // blank
             "// editing here\n".to_string(),
         ];
         let (_, level) = detect_expected_indent(&all_lines, 6, 6);
-        assert_eq!(level, 1, "Must scan past blank+anomaly to find the real context");
+        assert_eq!(
+            level, 1,
+            "Must scan past blank+anomaly to find the real context"
+        );
     }
 
     #[test]
@@ -654,7 +657,10 @@ mod tests {
         ];
         let (_, level) = detect_expected_indent(&all_lines, 5, 5);
         // Previous line ends with `,` → continuation, expect same or deeper
-        assert!(level >= 2, "Content after continuation line should keep indent");
+        assert!(
+            level >= 2,
+            "Content after continuation line should keep indent"
+        );
     }
 
     // ============================================================
@@ -663,10 +669,7 @@ mod tests {
 
     #[test]
     fn test_auto_indent_unindented_content() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "print('hello')";
         let fixed = auto_indent_content(&all_lines, 2, 2, content);
         assert_eq!(fixed, "    print('hello')");
@@ -674,10 +677,7 @@ mod tests {
 
     #[test]
     fn test_auto_indent_strips_existing_whitespace() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "  print('hello')";
         let fixed = auto_indent_content(&all_lines, 2, 2, content);
         assert_eq!(fixed, "    print('hello')");
@@ -685,10 +685,7 @@ mod tests {
 
     #[test]
     fn test_auto_indent_multiline_content() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "print('hello')\nprint('world')";
         let fixed = auto_indent_content(&all_lines, 2, 2, content);
         assert_eq!(fixed, "    print('hello')\n    print('world')");
@@ -696,10 +693,7 @@ mod tests {
 
     #[test]
     fn test_auto_indent_preserves_blank_lines() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "print('a')\n\nprint('b')";
         let fixed = auto_indent_content(&all_lines, 2, 2, content);
         assert_eq!(fixed, "    print('a')\n\n    print('b')");
@@ -707,10 +701,7 @@ mod tests {
 
     #[test]
     fn test_auto_indent_mixed_existing_indent() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "  line1\n    line2\nline3";
         let fixed = auto_indent_content(&all_lines, 2, 2, content);
         assert_eq!(fixed, "    line1\n    line2\n    line3");
@@ -718,10 +709,7 @@ mod tests {
 
     #[test]
     fn test_auto_indent_no_indent_needed() {
-        let all_lines = vec![
-            "fn main() {\n".to_string(),
-            "    let x = 1;\n".to_string(),
-        ];
+        let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
         let content = "println!(\"hello\");";
         let fixed = auto_indent_content(&all_lines, 1, 1, content);
         assert_eq!(fixed, "println!(\"hello\");");
@@ -754,28 +742,19 @@ mod tests {
 
     #[test]
     fn test_needs_indent_fix_unindented_content() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         assert!(needs_indent_fix(&all_lines, 2, 2, "print('hello')"));
     }
 
     #[test]
     fn test_needs_indent_fix_already_indented() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         assert!(!needs_indent_fix(&all_lines, 2, 2, "    print('hello')"));
     }
 
     #[test]
     fn test_needs_indent_fix_partial_indent() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         assert!(needs_indent_fix(&all_lines, 2, 2, "  print('hello')"));
     }
 
@@ -793,10 +772,7 @@ mod tests {
 
     #[test]
     fn test_needs_indent_fix_top_level() {
-        let all_lines = vec![
-            "fn main() {\n".to_string(),
-            "    let x = 1;\n".to_string(),
-        ];
+        let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
         assert!(!needs_indent_fix(&all_lines, 1, 1, "println!(\"hello\");"));
     }
 
@@ -806,10 +782,7 @@ mod tests {
 
     #[test]
     fn test_validate_indentation_missing() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let replacement = vec!["print('hello')".to_string()];
         let (valid, warning, fix) = validate_indentation(&all_lines, 2, 2, &replacement);
         assert!(!valid);
@@ -820,10 +793,7 @@ mod tests {
 
     #[test]
     fn test_validate_indentation_correct() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let replacement = vec!["    print('hello')".to_string()];
         let (valid, warning, _fix) = validate_indentation(&all_lines, 2, 2, &replacement);
         assert!(valid);
@@ -832,10 +802,7 @@ mod tests {
 
     #[test]
     fn test_validate_indentation_partial_fix_strips_existing() {
-        let all_lines = vec![
-            "def foo():\n".to_string(),
-            "    pass\n".to_string(),
-        ];
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let replacement = vec!["  print('hello')".to_string()];
         let (valid, _warning, fix) = validate_indentation(&all_lines, 2, 2, &replacement);
         assert!(!valid);
@@ -865,7 +832,11 @@ mod tests {
 
     #[test]
     fn test_indent_string_spaces() {
-        let style = IndentStyle { spaces: 4, uses_tabs: false, width: 4 };
+        let style = IndentStyle {
+            spaces: 4,
+            uses_tabs: false,
+            width: 4,
+        };
         assert_eq!(style.indent_string(0), "");
         assert_eq!(style.indent_string(1), "    ");
         assert_eq!(style.indent_string(2), "        ");
@@ -873,7 +844,11 @@ mod tests {
 
     #[test]
     fn test_indent_string_tabs() {
-        let style = IndentStyle { spaces: 0, uses_tabs: true, width: 4 };
+        let style = IndentStyle {
+            spaces: 0,
+            uses_tabs: true,
+            width: 4,
+        };
         assert_eq!(style.indent_string(0), "");
         assert_eq!(style.indent_string(1), "\t");
         assert_eq!(style.indent_string(2), "\t\t");
@@ -883,15 +858,18 @@ mod tests {
     fn test_round_to_nearest_level() {
         assert_eq!(round_to_nearest_level(0, 4), 0);
         assert_eq!(round_to_nearest_level(4, 4), 1);
-        assert_eq!(round_to_nearest_level(6, 4), 1);  // equidistant → round down
-        assert_eq!(round_to_nearest_level(2, 4), 0);  // equidistant → round down
-        assert_eq!(round_to_nearest_level(7, 4), 2);  // 7 > 6, closer to 8 → level 2
-        assert_eq!(round_to_nearest_level(3, 4), 1);  // 3 is closer to 4 than 0
+        assert_eq!(round_to_nearest_level(6, 4), 1); // equidistant → round down
+        assert_eq!(round_to_nearest_level(2, 4), 0); // equidistant → round down
+        assert_eq!(round_to_nearest_level(7, 4), 2); // 7 > 6, closer to 8 → level 2
+        assert_eq!(round_to_nearest_level(3, 4), 1); // 3 is closer to 4 than 0
     }
 
     #[test]
     fn test_strip_trailing_comment() {
-        assert_eq!(strip_trailing_comment("    let x = 1; // comment"), "    let x = 1; ");
+        assert_eq!(
+            strip_trailing_comment("    let x = 1; // comment"),
+            "    let x = 1; "
+        );
         assert_eq!(strip_trailing_comment("    # python comment"), "    ");
         assert_eq!(strip_trailing_comment("    let x = 1;"), "    let x = 1;");
         // # anywhere starts a comment (aggressive strip is safe for indent detection)

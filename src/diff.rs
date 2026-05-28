@@ -19,7 +19,11 @@ pub fn generate_preview(
     // Context before (up to 3 lines)
     let ctx_before = start.saturating_sub(3);
     for line in old_lines.iter().take(start - 1).skip(ctx_before) {
-        preview.push(format!(" {} | {}", ctx_before + 1, line.trim_end_matches('\n')));
+        preview.push(format!(
+            " {} | {}",
+            ctx_before + 1,
+            line.trim_end_matches('\n')
+        ));
     }
 
     // Separator
@@ -30,7 +34,12 @@ pub fn generate_preview(
     // Old content (marked for removal)
     let splice_start = start - 1;
     let splice_end = end.min(old_lines.len());
-    for (idx, line) in old_lines.iter().enumerate().take(splice_end).skip(splice_start) {
+    for (idx, line) in old_lines
+        .iter()
+        .enumerate()
+        .take(splice_end)
+        .skip(splice_start)
+    {
         preview.push(format!("-{}| {}", idx + 1, line.trim_end_matches('\n')));
     }
 
@@ -47,7 +56,11 @@ pub fn generate_preview(
             preview.push(" ...".to_string());
         }
         for line in old_lines.iter().take(ctx_after).skip(splice_end) {
-            preview.push(format!(" {} | {}", splice_end + 1, line.trim_end_matches('\n')));
+            preview.push(format!(
+                " {} | {}",
+                splice_end + 1,
+                line.trim_end_matches('\n')
+            ));
         }
     }
 
@@ -71,7 +84,11 @@ mod tests {
 
         assert!(preview.iter().any(|l| l.contains("--- original")));
         assert!(preview.iter().any(|l| l.contains("+++ modified")));
-        assert!(preview.iter().any(|l| l.starts_with('-') && l.contains("line2")));
-        assert!(preview.iter().any(|l| l.starts_with('+') && l.contains("new2")));
+        assert!(preview
+            .iter()
+            .any(|l| l.starts_with('-') && l.contains("line2")));
+        assert!(preview
+            .iter()
+            .any(|l| l.starts_with('+') && l.contains("new2")));
     }
 }

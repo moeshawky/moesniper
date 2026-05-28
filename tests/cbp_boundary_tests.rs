@@ -6,8 +6,8 @@
 //! All assertions use exact comparisons — no substring/oracle looseness.
 
 use moesniper::{
-    check_file_size, create_backup, hex_decode, normalize_path, purge_old_backups,
-    write_atomic, SniperConfig, SniperLock,
+    check_file_size, create_backup, hex_decode, normalize_path, purge_old_backups, write_atomic,
+    SniperConfig, SniperLock,
 };
 use std::fs;
 use std::io::Write;
@@ -59,10 +59,7 @@ fn test_lock_file_contains_pid() {
 
     drop(_lock);
     thread::sleep(Duration::from_millis(50));
-    assert!(
-        !lock_path.exists(),
-        "Lock file must be removed after drop"
-    );
+    assert!(!lock_path.exists(), "Lock file must be removed after drop");
 }
 
 #[test]
@@ -123,11 +120,7 @@ fn test_temp_files_use_unique_names() {
     let tmp_files_before: Vec<_> = fs::read_dir(&subdir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .contains("sniper_tmp")
-        })
+        .filter(|e| e.file_name().to_string_lossy().contains("sniper_tmp"))
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     assert!(
@@ -141,11 +134,7 @@ fn test_temp_files_use_unique_names() {
     let tmp_files_after: Vec<_> = fs::read_dir(&subdir)
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .contains("sniper_tmp")
-        })
+        .filter(|e| e.file_name().to_string_lossy().contains("sniper_tmp"))
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     assert!(
@@ -199,10 +188,14 @@ fn test_nonexistent_file_rejected_before_size_check() {
     let result = normalize_path("/tmp/sniper_cbp4_test_nonexistent_xyz.txt");
     // normalize_path for non-existent files without base_dir uses clean_path,
     // which should NOT go through canonicalize (which would fail)
-    assert!(result.is_ok(), "Valid path to non-existent file should normalize");
+    assert!(
+        result.is_ok(),
+        "Valid path to non-existent file should normalize"
+    );
     let path = result.unwrap();
     assert!(
-        path.to_string_lossy().contains("sniper_cbp4_test_nonexistent_xyz"),
+        path.to_string_lossy()
+            .contains("sniper_cbp4_test_nonexistent_xyz"),
         "Normalized path must contain the filename"
     );
 }
@@ -236,10 +229,7 @@ fn test_hex_decode_strips_whitespace() {
 fn test_hex_decode_rejects_unicode_surrogate_halves() {
     // 0xEDA080 encodes U+D800 which is a surrogate half (invalid UTF-8)
     let result = hex_decode("EDA080");
-    assert!(
-        result.is_err(),
-        "Surrogate halves must be rejected"
-    );
+    assert!(result.is_err(), "Surrogate halves must be rejected");
 }
 
 #[test]
@@ -331,20 +321,38 @@ fn test_backup_hashes_are_deterministic() {
     let b1_pb = PathBuf::from(&b1);
     let b2_pb = PathBuf::from(&b2);
     let hash1 = b1_pb
-        .file_name().unwrap().to_str().unwrap()
-        .split('.').next().unwrap();
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split('.')
+        .next()
+        .unwrap();
     let hash2 = b2_pb
-        .file_name().unwrap().to_str().unwrap()
-        .split('.').next().unwrap();
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split('.')
+        .next()
+        .unwrap();
     assert_eq!(hash1, hash2, "Same file path must produce same hash");
 
     // Different paths = different hashes
     let b3 = create_backup(file2.to_str().unwrap()).unwrap();
     let b3_pb = PathBuf::from(&b3);
     let hash3 = b3_pb
-        .file_name().unwrap().to_str().unwrap()
-        .split('.').next().unwrap();
-    assert_ne!(hash1, hash3, "Different paths must produce different hashes");
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split('.')
+        .next()
+        .unwrap();
+    assert_ne!(
+        hash1, hash3,
+        "Different paths must produce different hashes"
+    );
 
     // Cleanup
     let _ = fs::remove_file(PathBuf::from(&b1));
@@ -361,7 +369,10 @@ fn test_check_file_size_permission_denied() {
     // Create a file and remove read permission (but we need metadata which requires read on parent)
     // Instead, test that non-existent file gives proper metadata error
     let result = check_file_size("/tmp/sniper_cbp_nonexistent_xyzzy_12345.txt", 100);
-    assert!(result.is_err(), "Non-existent file must fail on metadata access");
+    assert!(
+        result.is_err(),
+        "Non-existent file must fail on metadata access"
+    );
     let msg = result.unwrap_err();
     assert!(
         msg.contains("metadata") || msg.contains("Failed to get metadata"),
@@ -393,9 +404,12 @@ fn test_manifest_empty_operations_list() {
     // Empty manifest via CLI
     let output = std::process::Command::new("cargo")
         .args([
-            "run", "--quiet", "--",
+            "run",
+            "--quiet",
+            "--",
             file_path.to_str().unwrap(),
-            "--manifest", "/dev/stdin",
+            "--manifest",
+            "/dev/stdin",
         ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -439,9 +453,12 @@ fn test_manifest_bad_hex_rejected_before_backup() {
 
     let output = std::process::Command::new("cargo")
         .args([
-            "run", "--quiet", "--",
+            "run",
+            "--quiet",
+            "--",
             file_path.to_str().unwrap(),
-            "--manifest", "/dev/stdin",
+            "--manifest",
+            "/dev/stdin",
         ])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -524,11 +541,7 @@ fn test_concurrent_backup_and_purge() {
         let count = fs::read_dir(&backup_dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .starts_with(&hash)
-            })
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
             .count();
         assert!(
             count <= 2,
@@ -555,7 +568,10 @@ fn test_file_size_exact_match_limit() {
 
     // File is 100 bytes, limit is 99 → should fail
     let result = check_file_size(file.to_str().unwrap(), 99);
-    assert!(result.is_err(), "File exceeding limit by 1 must be rejected");
+    assert!(
+        result.is_err(),
+        "File exceeding limit by 1 must be rejected"
+    );
 }
 
 #[test]
@@ -621,7 +637,10 @@ fn test_write_atomic_multiline_preserves_trailing_newline() {
     fs::write(&file, "line1\nline2\n").unwrap();
     write_atomic(file.to_str().unwrap(), &["a", "b", "c"]).unwrap();
     let content = fs::read_to_string(&file).unwrap();
-    assert_eq!(content, "a\nb\nc\n", "Multi-line must preserve trailing newline");
+    assert_eq!(
+        content, "a\nb\nc\n",
+        "Multi-line must preserve trailing newline"
+    );
 }
 
 #[test]
@@ -668,7 +687,11 @@ fn test_normalize_path_dot_slash_prefix() {
     let cwd = std::env::current_dir().unwrap();
     let _ = cwd; // not used directly but keep context
     let result = normalize_path(file.to_str().unwrap());
-    assert!(result.is_ok(), "Dot-slash path must normalize: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Dot-slash path must normalize: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -683,7 +706,10 @@ fn test_normalize_path_absolute() {
         "Absolute path must normalize: {:?}",
         result.err()
     );
-    assert!(result.unwrap().is_absolute(), "Normalized path must be absolute");
+    assert!(
+        result.unwrap().is_absolute(),
+        "Normalized path must be absolute"
+    );
 }
 
 #[test]

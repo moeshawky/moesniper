@@ -2,7 +2,7 @@ pub mod config;
 pub mod security;
 
 pub use config::SniperConfig;
-pub use security::{validate_path, SecurityPolicy, PathSecurityError, normalize_path_secure};
+pub use security::{normalize_path_secure, validate_path, PathSecurityError, SecurityPolicy};
 
 use std::fs;
 use std::io::Write;
@@ -37,14 +37,13 @@ pub fn hex_decode(hex: &str) -> Result<String, String> {
 }
 
 /// Normalize a file path.
-/// 
+///
 /// This function applies path traversal protection while maintaining
 /// backward compatibility with existing code.
 pub fn normalize_path(path: &str) -> Result<PathBuf, String> {
     // Use default security policy (rejects parent refs, allows absolute)
     let policy = SecurityPolicy::default();
-    validate_path(path, &policy)
-        .map_err(|e| e.to_string())
+    validate_path(path, &policy).map_err(|e| e.to_string())
 }
 
 /// Check if file size exceeds the configured limit.
@@ -56,7 +55,7 @@ pub fn check_file_size(filepath: &str, max_size: u64) -> Result<(), String> {
 
     let metadata = fs::metadata(filepath)
         .map_err(|e| format!("Failed to get metadata for {}: {}", filepath, e))?;
-    
+
     let size = metadata.len();
     if size > max_size {
         Err(format!(
@@ -120,24 +119,26 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
         return Ok(());
     }
 
-// Collect all backups for this file
-let mut backups: Vec<_> = fs::read_dir(&dir)
-    .map_err(|e| format!("read backup dir: {e}"))?
-    .filter_map(|e| e.ok())
-    .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
-    .filter_map(|e| {
-        let path = e.path();
-        let modified = e.metadata().ok()?.modified().ok()?;
-        Some((path, modified))
-    })
-    .collect();
+    // Collect all backups for this file
+    let mut backups: Vec<_> = fs::read_dir(&dir)
+        .map_err(|e| format!("read backup dir: {e}"))?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
+        .filter_map(|e| {
+            let path = e.path();
+            let modified = e.metadata().ok()?.modified().ok()?;
+            Some((path, modified))
+        })
+        .collect();
 
     // Sort by modification time (oldest first)
     backups.sort_by_key(|(_, modified)| *modified);
 
     let now = SystemTime::now();
     let max_age = if config.backup_max_age_days > 0 {
-        Some(Duration::from_secs(config.backup_max_age_days * 24 * 60 * 60))
+        Some(Duration::from_secs(
+            config.backup_max_age_days * 24 * 60 * 60,
+        ))
     } else {
         None
     };
@@ -222,7 +223,6 @@ fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
     }
     Ok(last_byte[0] == b'\n')
 }
-
 
 /// Unified atomic write with metabolic pacing via llmosafe 0.5.0.
 ///
@@ -423,14 +423,14 @@ mod tests {
         let normalized = normalized.unwrap();
         let hash = get_path_hash(&normalized);
         let backup_dir = PathBuf::from(BACKUP_DIR);
-        
+
         if backup_dir.exists() {
             let before_count: usize = fs::read_dir(&backup_dir)
                 .unwrap()
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
                 .count();
-            
+
             if before_count >= 5 {
                 // Purge
                 let _ = purge_old_backups(file.to_str().unwrap(), &config);
@@ -441,7 +441,7 @@ mod tests {
                     .filter_map(|e| e.ok())
                     .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
                     .count();
-                
+
                 assert_eq!(after_count, 3);
             }
         }

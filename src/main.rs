@@ -29,11 +29,11 @@ mod help_text;
 use std::fs;
 use std::io::Read;
 
-mod indent;
 mod diff;
+mod indent;
 
-use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
 use diff::generate_preview;
+use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
 
 use moesniper::{
     check_file_size, create_backup, find_latest_backup, handle_backtrack_error, hex_decode,
@@ -48,73 +48,87 @@ fn main() {
         std::process::exit(0);
     }
 
- let dry_run = args.iter().any(|a| a == "--dry-run");
- let json_out = args.iter().any(|a| a == "--json");
- let use_stdin = args.iter().any(|a| a == "--stdin");
- let auto_indent = args.iter().any(|a| a == "--auto-indent");
- let validate_indent = args.iter().any(|a| a == "--validate-indent");
- let args: Vec<&str> = args
- .iter()
- .filter(|a| {
- !(*a == "--dry-run"
- || *a == "--json"
- || *a == "--stdin"
- || *a == "--auto-indent"
- || *a == "--validate-indent")
- })
- .map(|s| s.as_str())
- .collect();
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+    let json_out = args.iter().any(|a| a == "--json");
+    let use_stdin = args.iter().any(|a| a == "--stdin");
+    let auto_indent = args.iter().any(|a| a == "--auto-indent");
+    let validate_indent = args.iter().any(|a| a == "--validate-indent");
+    let args: Vec<&str> = args
+        .iter()
+        .filter(|a| {
+            !(*a == "--dry-run"
+                || *a == "--json"
+                || *a == "--stdin"
+                || *a == "--auto-indent"
+                || *a == "--validate-indent")
+        })
+        .map(|s| s.as_str())
+        .collect();
 
-let result = match args.as_slice() {
- ["encode"] if use_stdin => {
- let mut buffer = String::new();
- match std::io::stdin().read_to_string(&mut buffer) {
- Ok(_) => cmd_encode(&buffer),
- Err(e) => err(format!("read stdin: {e}")),
- }
- }
- ["encode", "--file", path] => match fs::read_to_string(path) {
- Ok(content) => cmd_encode(&content),
- Err(e) => err(format!("read {path}: {e}")),
- },
- ["encode", text] => cmd_encode(text),
- [file, "--undo"] => cmd_undo(file),
- [file, "--manifest"] if use_stdin => cmd_manifest_stdin(file, dry_run, auto_indent, validate_indent),
- [file, "--manifest", manifest] => cmd_manifest(file, manifest, dry_run, auto_indent, validate_indent),
- [file, start, end, "--delete"] => {
- if use_stdin {
- err("cannot use --stdin with --delete".into())
- } else {
- match (parse_line(start), parse_line(end)) {
- (Ok(s), Ok(e)) => cmd_splice(file, s, e, "", dry_run, auto_indent, validate_indent),
- (Err(e), _) | (_, Err(e)) => err(e),
- }
- }
- }
- [file, start, end] if use_stdin => {
- let mut buffer = String::new();
- match std::io::stdin().read_to_string(&mut buffer) {
- Ok(_) => match (parse_line(start), parse_line(end)) {
- (Ok(ln_start), Ok(ln_end)) => {
- cmd_splice(file, ln_start, ln_end, &buffer, dry_run, auto_indent, validate_indent)
- }
- (Err(e), _) | (_, Err(e)) => err(e),
- },
- Err(e) => err(format!("read stdin: {e}")),
- }
- }
- [file, start, end, hex] => match (parse_line(start), parse_line(end)) {
- (Ok(s), Ok(e)) => match hex_decode(hex) {
- Ok(content) => cmd_splice(file, s, e, &content, dry_run, auto_indent, validate_indent),
- Err(msg) => err(format!("hex decode: {msg}")),
- },
- (Err(e), _) | (_, Err(e)) => err(e),
- },
- _ => {
- eprintln!("error: bad arguments. Run 'sniper --help'");
- std::process::exit(1);
- }
- };
+    let result = match args.as_slice() {
+        ["encode"] if use_stdin => {
+            let mut buffer = String::new();
+            match std::io::stdin().read_to_string(&mut buffer) {
+                Ok(_) => cmd_encode(&buffer),
+                Err(e) => err(format!("read stdin: {e}")),
+            }
+        }
+        ["encode", "--file", path] => match fs::read_to_string(path) {
+            Ok(content) => cmd_encode(&content),
+            Err(e) => err(format!("read {path}: {e}")),
+        },
+        ["encode", text] => cmd_encode(text),
+        [file, "--undo"] => cmd_undo(file),
+        [file, "--manifest"] if use_stdin => {
+            cmd_manifest_stdin(file, dry_run, auto_indent, validate_indent)
+        }
+        [file, "--manifest", manifest] => {
+            cmd_manifest(file, manifest, dry_run, auto_indent, validate_indent)
+        }
+        [file, start, end, "--delete"] => {
+            if use_stdin {
+                err("cannot use --stdin with --delete".into())
+            } else {
+                match (parse_line(start), parse_line(end)) {
+                    (Ok(s), Ok(e)) => {
+                        cmd_splice(file, s, e, "", dry_run, auto_indent, validate_indent)
+                    }
+                    (Err(e), _) | (_, Err(e)) => err(e),
+                }
+            }
+        }
+        [file, start, end] if use_stdin => {
+            let mut buffer = String::new();
+            match std::io::stdin().read_to_string(&mut buffer) {
+                Ok(_) => match (parse_line(start), parse_line(end)) {
+                    (Ok(ln_start), Ok(ln_end)) => cmd_splice(
+                        file,
+                        ln_start,
+                        ln_end,
+                        &buffer,
+                        dry_run,
+                        auto_indent,
+                        validate_indent,
+                    ),
+                    (Err(e), _) | (_, Err(e)) => err(e),
+                },
+                Err(e) => err(format!("read stdin: {e}")),
+            }
+        }
+        [file, start, end, hex] => match (parse_line(start), parse_line(end)) {
+            (Ok(s), Ok(e)) => match hex_decode(hex) {
+                Ok(content) => {
+                    cmd_splice(file, s, e, &content, dry_run, auto_indent, validate_indent)
+                }
+                Err(msg) => err(format!("hex decode: {msg}")),
+            },
+            (Err(e), _) | (_, Err(e)) => err(e),
+        },
+        _ => {
+            eprintln!("error: bad arguments. Run 'sniper --help'");
+            std::process::exit(1);
+        }
+    };
 
     if json_out {
         println!(
@@ -131,43 +145,43 @@ let result = match args.as_slice() {
             ),
             "restored" => println!("restored: {}", result.backup.as_deref().unwrap_or("?")),
             "encoded" => println!("{}", result.message.as_deref().unwrap_or("")),
- "dry_run" => {
- println!("=== DRY RUN PREVIEW ===");
- println!("File: {}", result.file.as_deref().unwrap_or("?"));
- println!("Lines to remove: {}", result.lines_removed);
- println!("Lines to insert: {}", result.lines_inserted);
+            "dry_run" => {
+                println!("=== DRY RUN PREVIEW ===");
+                println!("File: {}", result.file.as_deref().unwrap_or("?"));
+                println!("Lines to remove: {}", result.lines_removed);
+                println!("Lines to insert: {}", result.lines_inserted);
 
- if let Some(ref warning) = result.indent_warning {
- println!("\n⚠️  INDENTATION WARNING:");
- for line in warning.lines() {
- println!("   {}", line);
- }
- }
+                if let Some(ref warning) = result.indent_warning {
+                    println!("\n⚠️  INDENTATION WARNING:");
+                    for line in warning.lines() {
+                        println!("   {}", line);
+                    }
+                }
 
- if result.indent_fixed == Some(true) {
- println!("\n✓ Auto-indent applied");
- }
+                if result.indent_fixed == Some(true) {
+                    println!("\n✓ Auto-indent applied");
+                }
 
- if let Some(ref preview) = result.diff_preview {
- println!("\n--- Diff Preview ---");
- for line in preview {
- println!("{}", line);
- }
- }
+                if let Some(ref preview) = result.diff_preview {
+                    println!("\n--- Diff Preview ---");
+                    for line in preview {
+                        println!("{}", line);
+                    }
+                }
 
- if result.ai_hint.is_some() {
- println!("\nHint: {}", result.ai_hint.as_deref().unwrap_or(""));
- }
+                if result.ai_hint.is_some() {
+                    println!("\nHint: {}", result.ai_hint.as_deref().unwrap_or(""));
+                }
 
- // Also output JSON if explicitly requested, but pretty print is default for dry-run
- if json_out {
- println!("\n--- JSON Output ---");
- println!(
- "{}",
- serde_json::to_string_pretty(&result).unwrap_or_default()
- );
- }
- }
+                // Also output JSON if explicitly requested, but pretty print is default for dry-run
+                if json_out {
+                    println!("\n--- JSON Output ---");
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&result).unwrap_or_default()
+                    );
+                }
+            }
             _ => {
                 eprintln!("error: {}", result.message.as_deref().unwrap_or("unknown"));
                 std::process::exit(1);
@@ -178,27 +192,27 @@ let result = match args.as_slice() {
 
 #[derive(serde::Serialize, Default)]
 struct CliResult {
- status: String,
- #[serde(skip_serializing_if = "Option::is_none")]
- file: Option<String>,
- #[serde(skip_serializing_if = "Option::is_none")]
- message: Option<String>,
- lines_removed: usize,
- lines_inserted: usize,
- #[serde(skip_serializing_if = "Option::is_none")]
- total_lines: Option<usize>,
- #[serde(skip_serializing_if = "Option::is_none")]
- operations: Option<usize>,
- #[serde(skip_serializing_if = "Option::is_none")]
- backup: Option<String>,
- #[serde(skip_serializing_if = "Option::is_none")]
- ai_hint: Option<String>,
- #[serde(skip_serializing_if = "Option::is_none")]
- diff_preview: Option<Vec<String>>,
- #[serde(skip_serializing_if = "Option::is_none")]
- indent_warning: Option<String>,
- #[serde(skip_serializing_if = "Option::is_none")]
- indent_fixed: Option<bool>,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    lines_removed: usize,
+    lines_inserted: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_lines: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operations: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backup: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ai_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diff_preview: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    indent_warning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    indent_fixed: Option<bool>,
 }
 
 fn cmd_encode(text: &str) -> CliResult {
@@ -248,103 +262,103 @@ fn cmd_splice(
     };
     let lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
- if start < 1 || end > lines.len() || start > end + 1 {
- if start == lines.len() + 1 && start == end + 1 {
- // Allow inserting at end
- } else {
- return err(format!(
- "line range {start}-{end} out of bounds (file has {} lines)",
- lines.len()
- ));
- }
- }
+    if start < 1 || end > lines.len() || start > end + 1 {
+        if start == lines.len() + 1 && start == end + 1 {
+            // Allow inserting at end
+        } else {
+            return err(format!(
+                "line range {start}-{end} out of bounds (file has {} lines)",
+                lines.len()
+            ));
+        }
+    }
 
- let s = start - 1;
- let removed_lines_count = if s < lines.len() {
- let actual_end = end.min(lines.len());
- actual_end - s
- } else {
- 0
- };
+    let s = start - 1;
+    let removed_lines_count = if s < lines.len() {
+        let actual_end = end.min(lines.len());
+        actual_end - s
+    } else {
+        0
+    };
 
- // Parse new content
- let mut new_lines: Vec<String> = if content.is_empty() {
- vec![]
- } else {
- content.split_inclusive('\n').map(String::from).collect()
- };
+    // Parse new content
+    let mut new_lines: Vec<String> = if content.is_empty() {
+        vec![]
+    } else {
+        content.split_inclusive('\n').map(String::from).collect()
+    };
 
- let is_delete = content.is_empty();
+    let is_delete = content.is_empty();
 
- // Handle auto-indent
- let mut indent_fixed = None;
- let mut indent_warning = None;
+    // Handle auto-indent
+    let mut indent_fixed = None;
+    let mut indent_warning = None;
 
- if !is_delete {
- if auto_indent && needs_indent_fix(&lines, start, end, content) {
- let fixed = auto_indent_content(&lines, start, end, content);
- new_lines = fixed.split_inclusive('\n').map(String::from).collect();
- indent_fixed = Some(true);
- }
+    if !is_delete {
+        if auto_indent && needs_indent_fix(&lines, start, end, content) {
+            let fixed = auto_indent_content(&lines, start, end, content);
+            new_lines = fixed.split_inclusive('\n').map(String::from).collect();
+            indent_fixed = Some(true);
+        }
 
- if validate_indent || dry_run {
- let (valid, warning, _suggested) = validate_indentation(&lines, start, end, &new_lines);
- if !valid {
- indent_warning = warning.clone();
- if validate_indent && !dry_run {
- let msg = warning.unwrap_or_else(|| "Unknown indentation error".to_string());
- return CliResult {
- status: "error".into(),
- file: Some(filepath.into()),
- message: Some(format!("Indentation validation failed: {}", msg)),
- indent_warning,
- ..Default::default()
- };
- }
- }
- }
- }
+        if validate_indent || dry_run {
+            let (valid, warning, _suggested) = validate_indentation(&lines, start, end, &new_lines);
+            if !valid {
+                indent_warning = warning.clone();
+                if validate_indent && !dry_run {
+                    let msg = warning.unwrap_or_else(|| "Unknown indentation error".to_string());
+                    return CliResult {
+                        status: "error".into(),
+                        file: Some(filepath.into()),
+                        message: Some(format!("Indentation validation failed: {}", msg)),
+                        indent_warning,
+                        ..Default::default()
+                    };
+                }
+            }
+        }
+    }
 
- // Generate diff preview for dry-run
- let diff_preview = if dry_run && !is_delete {
- Some(generate_preview(&lines, &new_lines, start, end))
- } else {
- None
- };
+    // Generate diff preview for dry-run
+    let diff_preview = if dry_run && !is_delete {
+        Some(generate_preview(&lines, &new_lines, start, end))
+    } else {
+        None
+    };
 
- if dry_run {
- let ai_hint = Some(if is_delete {
- format!("verify: {} around line {}", filepath, start)
- } else {
- format!("verify: read {} lines {}-{}", filepath, start, end)
- });
- return CliResult {
- status: "dry_run".into(),
- file: Some(filepath.into()),
- lines_removed: removed_lines_count,
- lines_inserted: new_lines.len(),
- ai_hint,
- diff_preview,
- indent_warning,
- indent_fixed,
- ..Default::default()
- };
- }
+    if dry_run {
+        let ai_hint = Some(if is_delete {
+            format!("verify: {} around line {}", filepath, start)
+        } else {
+            format!("verify: read {} lines {}-{}", filepath, start, end)
+        });
+        return CliResult {
+            status: "dry_run".into(),
+            file: Some(filepath.into()),
+            lines_removed: removed_lines_count,
+            lines_inserted: new_lines.len(),
+            ai_hint,
+            diff_preview,
+            indent_warning,
+            indent_fixed,
+            ..Default::default()
+        };
+    }
 
- let bk = match create_backup(filepath) {
- Ok(b) => b,
- Err(e) => return err(e),
- };
+    let bk = match create_backup(filepath) {
+        Ok(b) => b,
+        Err(e) => return err(e),
+    };
 
- let new_lines_count = new_lines.len();
- let mut modified_lines = lines.clone();
+    let new_lines_count = new_lines.len();
+    let mut modified_lines = lines.clone();
 
- if s < modified_lines.len() {
- let actual_end = end.min(modified_lines.len());
- modified_lines.splice(s..actual_end, new_lines);
- } else {
- modified_lines.extend(new_lines);
- }
+    if s < modified_lines.len() {
+        let actual_end = end.min(modified_lines.len());
+        modified_lines.splice(s..actual_end, new_lines);
+    } else {
+        modified_lines.extend(new_lines);
+    }
 
     let lines_refs: Vec<&str> = modified_lines.iter().map(|s| s.as_str()).collect();
     if let Err(e) = write_atomic(filepath, &lines_refs) {
@@ -355,43 +369,60 @@ fn cmd_splice(
     let _ = purge_old_backups(filepath, &config);
 
     let ai_hint = Some(if is_delete {
- format!("verify: {} around line {}", filepath, start)
- } else {
- format!("verify: read {} lines {}-{}", filepath, start, end)
- });
+        format!("verify: {} around line {}", filepath, start)
+    } else {
+        format!("verify: read {} lines {}-{}", filepath, start, end)
+    });
 
- CliResult {
- status: "ok".into(),
- file: Some(filepath.into()),
- lines_removed: removed_lines_count,
- lines_inserted: new_lines_count,
- total_lines: Some(modified_lines.len()),
- backup: Some(bk),
- ai_hint,
- indent_warning,
- indent_fixed,
- ..Default::default()
- }
+    CliResult {
+        status: "ok".into(),
+        file: Some(filepath.into()),
+        lines_removed: removed_lines_count,
+        lines_inserted: new_lines_count,
+        total_lines: Some(modified_lines.len()),
+        backup: Some(bk),
+        ai_hint,
+        indent_warning,
+        indent_fixed,
+        ..Default::default()
+    }
 }
 
-fn cmd_manifest_stdin(filepath: &str, dry_run: bool, auto_indent: bool, validate_indent: bool) -> CliResult {
- let mut buffer = String::new();
- let manifest = match std::io::stdin().read_to_string(&mut buffer) {
- Ok(_) => buffer,
- Err(e) => return err(format!("read manifest from stdin: {e}")),
- };
- cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, validate_indent)
+fn cmd_manifest_stdin(
+    filepath: &str,
+    dry_run: bool,
+    auto_indent: bool,
+    validate_indent: bool,
+) -> CliResult {
+    let mut buffer = String::new();
+    let manifest = match std::io::stdin().read_to_string(&mut buffer) {
+        Ok(_) => buffer,
+        Err(e) => return err(format!("read manifest from stdin: {e}")),
+    };
+    cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, validate_indent)
 }
 
-fn cmd_manifest(filepath: &str, manifest_path: &str, dry_run: bool, auto_indent: bool, validate_indent: bool) -> CliResult {
- let manifest = match fs::read_to_string(manifest_path) {
- Ok(m) => m,
- Err(e) => return err(format!("read manifest: {e}")),
- };
- cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, validate_indent)
+fn cmd_manifest(
+    filepath: &str,
+    manifest_path: &str,
+    dry_run: bool,
+    auto_indent: bool,
+    validate_indent: bool,
+) -> CliResult {
+    let manifest = match fs::read_to_string(manifest_path) {
+        Ok(m) => m,
+        Err(e) => return err(format!("read manifest: {e}")),
+    };
+    cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, validate_indent)
 }
 
-fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool, auto_indent: bool, validate_indent: bool) -> CliResult {
+fn cmd_manifest_impl(
+    filepath: &str,
+    manifest: &str,
+    dry_run: bool,
+    auto_indent: bool,
+    validate_indent: bool,
+) -> CliResult {
     let config = SniperConfig::from_env();
 
     // Validate path before any file operations
@@ -428,8 +459,8 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool, auto_indent:
     };
     let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
- // Sort bottom-up
- ops.sort_by_key(|b| std::cmp::Reverse(b.start));
+    // Sort bottom-up
+    ops.sort_by_key(|b| std::cmp::Reverse(b.start));
 
     let bk = if !dry_run {
         match create_backup(filepath) {
@@ -442,51 +473,58 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool, auto_indent:
     let mut total_removed = 0usize;
     let mut total_inserted = 0usize;
 
-for op in &ops {
- let s = op.start.saturating_sub(1);
- let e = op.end.unwrap_or(op.start);
+    for op in &ops {
+        let s = op.start.saturating_sub(1);
+        let e = op.end.unwrap_or(op.start);
 
- if op.delete.unwrap_or(false) {
- total_removed += lines.splice(s..e, std::iter::empty()).count();
- } else if let Some(ref hex) = op.hex {
- let content = hex_decode(hex).unwrap(); // Pre-validated above
+        if op.delete.unwrap_or(false) {
+            total_removed += lines.splice(s..e, std::iter::empty()).count();
+        } else if let Some(ref hex) = op.hex {
+            let content = hex_decode(hex).unwrap(); // Pre-validated above
 
- // Apply auto-indent if needed
- let final_content = if auto_indent && needs_indent_fix(&lines, op.start, e, &content) {
- auto_indent_content(&lines, op.start, e, &content)
- } else {
- content
- };
+            // Apply auto-indent if needed
+            let final_content = if auto_indent && needs_indent_fix(&lines, op.start, e, &content) {
+                auto_indent_content(&lines, op.start, e, &content)
+            } else {
+                content
+            };
 
- // Validate indentation if requested
- if validate_indent && !dry_run {
- let new_lines_for_check: Vec<String> = final_content.split_inclusive('\n').map(String::from).collect();
- let (valid, warning, _) = validate_indentation(&lines, op.start, e, &new_lines_for_check);
-if !valid {
-                return CliResult {
-                    status: "error".into(),
-                    file: Some(filepath.into()),
-                    message: Some(format!(
-                        "Indentation validation failed at line {}: {}",
-                        op.start,
-                        warning.as_deref().unwrap_or_default()
-                    )),
-                    indent_warning: warning,
-                    ..Default::default()
-                };
+            // Validate indentation if requested
+            if validate_indent && !dry_run {
+                let new_lines_for_check: Vec<String> = final_content
+                    .split_inclusive('\n')
+                    .map(String::from)
+                    .collect();
+                let (valid, warning, _) =
+                    validate_indentation(&lines, op.start, e, &new_lines_for_check);
+                if !valid {
+                    return CliResult {
+                        status: "error".into(),
+                        file: Some(filepath.into()),
+                        message: Some(format!(
+                            "Indentation validation failed at line {}: {}",
+                            op.start,
+                            warning.as_deref().unwrap_or_default()
+                        )),
+                        indent_warning: warning,
+                        ..Default::default()
+                    };
+                }
             }
- }
 
- let new: Vec<String> = final_content.split_inclusive('\n').map(String::from).collect();
- total_removed += e - s;
- total_inserted += new.len();
- lines.splice(s..e, new);
- }
- }
+            let new: Vec<String> = final_content
+                .split_inclusive('\n')
+                .map(String::from)
+                .collect();
+            total_removed += e - s;
+            total_inserted += new.len();
+            lines.splice(s..e, new);
+        }
+    }
 
     if !dry_run {
         let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-    if let Err(e) = write_atomic(filepath, &lines_refs) {
+        if let Err(e) = write_atomic(filepath, &lines_refs) {
             return err(e);
         }
         let _ = purge_old_backups(filepath, &config);
@@ -621,17 +659,17 @@ mod tests {
 
     // --- cmd_splice tests ---
 
- #[test]
- fn test_cmd_splice_replace_single_line() {
- let dir = TempDir::new().unwrap();
- let path = create_file(&dir, "test.txt", "line1\nline2\nline3\n");
- let r = cmd_splice(&path, 2, 2, "hex", false, false, false);
- assert_eq!(r.status, "ok");
- assert_eq!(r.lines_removed, 1);
- assert_eq!(r.lines_inserted, 1);
- let content = fs::read_to_string(&path).unwrap();
- assert_eq!(content, "line1\nhex\nline3\n");
- }
+    #[test]
+    fn test_cmd_splice_replace_single_line() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "test.txt", "line1\nline2\nline3\n");
+        let r = cmd_splice(&path, 2, 2, "hex", false, false, false);
+        assert_eq!(r.status, "ok");
+        assert_eq!(r.lines_removed, 1);
+        assert_eq!(r.lines_inserted, 1);
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "line1\nhex\nline3\n");
+    }
 
     #[test]
     fn test_cmd_splice_preserves_missing_trailing_newline() {
@@ -858,17 +896,25 @@ mod tests {
 
     // --- edge case tests ---
 
-#[test]
-fn test_file_not_found() {
-    let r = cmd_splice("/tmp/no_such_file_12345.txt", 1, 1, "78", false, false, false);
-    assert_eq!(r.status, "error");
-    let msg = r.message.as_deref().unwrap().to_lowercase();
-    assert!(
-        msg.contains("read") || msg.contains("metadata") || msg.contains("no such file"),
-        "expected file-related error, got: {}",
-        msg
-    );
-}
+    #[test]
+    fn test_file_not_found() {
+        let r = cmd_splice(
+            "/tmp/no_such_file_12345.txt",
+            1,
+            1,
+            "78",
+            false,
+            false,
+            false,
+        );
+        assert_eq!(r.status, "error");
+        let msg = r.message.as_deref().unwrap().to_lowercase();
+        assert!(
+            msg.contains("read") || msg.contains("metadata") || msg.contains("no such file"),
+            "expected file-related error, got: {}",
+            msg
+        );
+    }
 
     #[test]
     fn test_cmd_splice_delete_last_line_preserves_non_termination_if_possible() {
@@ -881,10 +927,10 @@ fn test_file_not_found() {
         assert_eq!(r.status, "ok");
 
         let content = fs::read_to_string(&path).unwrap();
-    // After PR #8: trailing newlines are stripped uniformly, then re-added based on original file.
-    // Original had no trailing newline, so result should be "a" (no trailing newline).
+        // After PR #8: trailing newlines are stripped uniformly, then re-added based on original file.
+        // Original had no trailing newline, so result should be "a" (no trailing newline).
         // Let's see what it is currently.
-    assert_eq!(content, "a");
+        assert_eq!(content, "a");
     }
 
     #[test]
