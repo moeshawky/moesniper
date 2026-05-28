@@ -5,106 +5,53 @@ All notable changes to moesniper will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0.html).
 
-## [0.5.1] - 2026-05-14
+## [0.5.1] - 2026-05-28
 
 ### Added
 
-#### Test Suite Improvements
-Following the `llm-testing-patterns` skill methodology, added comprehensive test coverage for LLM-specific failure modes:
+#### Indentation Intelligence
+- Auto-indent (`--auto-indent`): Detects expected indentation from surrounding context and automatically prepends missing leading whitespace. Statistical step detection with 80% supermajority, raw frequency scoring, round-to-nearest, whitespace stripping, and smaller-is-step tiebreaker — robust against "stupid indentation" from LLM output.
+- Validate-indent (`--validate-indent`): Checks for indentation mismatch without modifying content. Blocks non-dry-run edits on mismatch.
+- Complete indent engine rewrite (`src/indent.rs`) with 40 adversarial tests covering tabs, spaces, mixed styles, blank lines, continuation lines, brace openers, and LLM-grade inconsistent spacing.
 
-- **Smoke Tests** (`tests/smoke.rs`)
-  - Binary existence and execution validation
-  - Core command documentation verification (--undo, --manifest, --encode)
-  - Path traversal rejection tests
-  - File permissions preservation tests
+#### Lock Hardening (CBP-1)
+- PID-based lock files: lock content contains the process PID, enabling stale lock detection.
+- Stale lock auto-recovery: On timeout, reads lock PID, checks `/proc/{pid}` liveness. Dead process → remove lock and retry. Garbage/non-numeric lock content treated as "not stale" (safe default).
+- Configurable lock timeout via `SNIPER_LOCK_TIMEOUT`.
 
-- **Edge Case Matrix** (`tests/unit_edge_cases.rs`)
-  - Empty file handling
-  - Single character files
-  - Very long lines (100k+ characters)
-  - Unicode/Arabic content support
-  - Invalid line numbers (line 0, beyond EOF)
-  - No trailing newline scenarios
+#### Secure Temp Files (CBP-3)
+- Nanosecond timestamp suffix on temp files (`{filepath}.sniper_tmp.{ts}`) instead of fixed name, preventing collision.
 
-- **Property-Based Tests** (`tests/property_invariants.rs`)
-  - Encode/decode roundtrip invariants
-  - Undo inverse property verification
-  - Line number 1-indexing guarantees
-  - File size stability for same-length replacements
-  - No state corruption on failure
+#### Path Validation Order (CBP-4)
+- `normalize_path` called before `check_file_size` in both `cmd_splice` and `cmd_manifest_impl`, eliminating a TOCTOU window between path validation and file operations.
 
-- **Golden File Regression Tests** (`tests/regression_golden.rs`)
-  - Undo stack behavior baseline
-  - Basic splice operation verification
-  - Newline preservation checks
-  - Manifest operation regression detection
-  - Error message format stability
-
-- **Test Documentation** (`tests/README.md`)
-  - Comprehensive test structure overview
-  - Coverage by failure mode (G-HALL through G-DRIFT)
-  - Running instructions with fail-fast ordering
-  - Cascade detection guide
-
-#### Documentation
-- **docs/TEST_IMPROVEMENTS.md**: Detailed guide to test suite improvements, coverage matrix, and cascade detection protocol
+#### Comprehensive Test Suite
+- CBP boundary tests (`tests/cbp_boundary_tests.rs`): 29 tests covering PID lock acquisition, stale lock recovery, temp file uniqueness, path ordering, hex edge cases, backup contract, manifest validation, and concurrent lock purge.
+- Regression golden file tests — undo stack behavior baseline, newline preservation, manifest regression detection.
+- 171 total tests (19 lib, 81 main, 29 CBP, 15 enterprise, 6 integration, 5 property, 5 regression, 5 smoke, 6 unit edge).
 
 ### Changed
 
-#### Help Text Refactor
-- Extracted help text to dedicated module (`src/help_text.rs`)
-- Improved help text organization with "QUICK START" section
-- Added practical examples for common workflows
-- Enhanced encoding instructions with safe patterns
-- Added "stealth signaling" for LLM agents (subtle guidance patterns)
-
-#### Main Module
-- Reduced inline help text from 44 lines to single module reference
-- Improved code organization and maintainability
-
-### Technical Details
-
-#### Test Coverage by Failure Mode
-| Failure Mode | File | Tests | Priority |
-|--------------|------|-------|----------|
-| G-HALL (Hallucinated APIs) | smoke.rs | 4 | 1 (first) |
-| G-SEC (Security) | smoke.rs | 2 | 2 |
-| G-EDGE (Edge Cases) | unit_edge_cases.rs | 9 | 3 |
-| G-SEM (Semantic) | property_invariants.rs | 5 | 4 |
-| G-ERR (Error Handling) | unit_edge_cases.rs | (implicit) | 5 |
-| G-CTX (Context) | integration.rs | (existing) | 6 |
-| G-DRIFT (Model Version Drift) | regression_golden.rs | 5 | 7 |
-| G-PERF (Performance) | benches/ | (benchmark) | 8 |
-
-#### Test Statistics
-- **Before**: 66 tests, mostly happy-path integration tests
-- **After**: 85+ tests (29 new) with systematic failure mode coverage
-- **Test Suites**: 7 organized by failure mode
-- **Property-Based**: proptest integration with regression seeds
+- **llmosafe 0.5.0 → 0.6.2**: `ResourceGuard::auto(0.5)` replaces hardcoded 256MB ceiling, adapting to deployment environment. Added `ResourceGuard::check()` call before atomic rename for proper `KernelError` propagation.
+- **Dead code removal**: Removed `use_os_locking` config field and `SNIPER_USE_OS_LOCKING` env var (feature flag was parsed but never consumed — `flock()` was never implemented). Removed `libc` dependency (zero imports).
+- **Clippy clean**: `field_reassign_with_default` fixed, `if_same_then_else` blocks merged, `is_multiple_of()` used instead of manual mod.
+- **Cargo.toml**: Added `rust-version = "1.70"` for MSRV discoverability.
+- **Documentation**: `CHANGELOG.md`, `README.md` rewritten with v0.5.1 feature coverage. Help text expanded with `--stdin`, `--validate-indent`, auto-indent, and env var reference. Root docs consolidated into `docs/`.
 
 ### Security
 
-- All existing security features maintained:
-  - Path traversal protection via `normalize_path()`
-  - Symlink attack mitigation
-  - llmosafe Backtrack Signal (-7) handling
-  - Atomic file writes with temp file + rename
-  - Lock-based concurrency control
+- Path traversal protection (`SecurityPolicy`, `normalize_path`) — CWE-22 covered.
+- Symlink-safe operations (no `follow_symlinks` without validation).
+- PID-based per-file locking with stale lock auto-recovery (CBP-1).
+- Atomic writes with unique temp file names (CBP-3).
 
-### Dependencies
+### Audit
 
-No new dependencies added. Test improvements use existing dev-dependencies:
-- `tempfile` (existing)
-- `proptest` (existing)
-
-### Audit Results
-
-**Pre-publication audit status**: ✅ CLEARED
-- G1 Evidence: All identifiers verified in source
-- G2 Compilation: `cargo check --all-targets` clean
-- G3 Tests: 97 tests, 0 failures
-- G4 Witness: Internal review completed
-- G5 Deacon: No CI blockers
+- **CAM structural audit**: 21 pub exports verified, zero dead code, all 5 config fields consumed.
+- **CAM G-* execution audit**: All 9 modes pass. No CWE patterns. Clippy clean.
+- **CBP boundary audit**: 10 boundaries mapped, 3 low-severity accepted findings, zero compound cascades.
+- **Publish signal**: GREEN — `cargo publish --dry-run` passes, 171 tests, 0 failures.
+- **WD-40 cleanup**: Workspace 1.2GB → 362MB. Removed `libc` dead dep, `target/` build artifacts, `.sniper/` 25K backup files, `.ix/` search cache.
 
 ---
 
@@ -182,7 +129,7 @@ No new dependencies added. Test improvements use existing dev-dependencies:
 
 | Version | Date | Key Feature |
 |---------|------|-------------|
-| 0.5.1 | 2026-05-14 | Comprehensive test suite + help text refactor |
+| 0.5.1 | 2026-05-28 | Indent engine, PID locks, CBP hardening, llmosafe 0.6.2, 171 tests |
 | 0.5.0 | 2026-05-14 | Enterprise security + auto-indent + dry-run |
 | 0.4.0 | 2025-04-22 | Manifest operations + multi-step undo |
 | 0.3.0 | 2025-04-21 | Basic splicing + hex encoding |
