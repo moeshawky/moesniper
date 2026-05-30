@@ -1,4 +1,4 @@
-pub const HELP: &str = r#"sniper — precision file editor for LLM agents
+pub const HELP: &str = r#"sniper — escape-proof precision file editor for LLM agents
 
 USAGE:
     sniper <file> <start> <end> <hex>       Replace lines with hex content
