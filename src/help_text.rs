@@ -4,16 +4,18 @@ USAGE:
     sniper <file> <start> <end> <hex>       Replace lines with hex content
     sniper <file> <start> <end> --delete    Delete line range
     sniper <file> <start> <end> --stdin     Read content from stdin
+    sniper <file> <start> <end> <hex> --context <hash>  Verify context before applying
     sniper <file> --manifest <path>         Batch operations from JSON
     sniper <file> --undo                    Restore from backup
-    sniper encode [--stdin|--file <path>]   Hex-encode content
+    sniper encode [--stdin|--file <path>|<text>]  Hex-encode content
 
 FLAGS:
     --dry-run           Preview changes without applying
     --json              Output machine-readable JSON
     --stdin             Read replacement content from stdin
+    --context <hash>    Verify context SHA-256 hash (first 16 hex chars) before applying
     --auto-indent       Auto-detect and apply indentation from context
-    --validate-indent   Warn on indentation mismatch
+    --force-indent      Bypass indentation validation (allow unindented content)
 
 QUICK START:
     # Replace line 5 with "hello"
@@ -51,13 +53,16 @@ BACKUPS:
     Use --undo to restore the previous version.
     Backups are purged by count (default 50) and age (default 30 days).
 
-AUTO-INDENT:
+INDENTATION:
+    Indentation validation runs on every edit. If the replacement content has
+    different leading whitespace than the surrounding lines, the edit is blocked.
+
     --auto-indent detects the expected indentation from surrounding lines
     and automatically prepends missing leading whitespace. Useful when LLM
     output omits indentation.
 
-    --validate-indent checks for indentation mismatch without modifying
-    content. On dry-run, reports a warning. On non-dry-run, blocks the edit.
+    --force-indent bypasses indentation validation entirely. Use when
+    deliberately refactoring or inserting top-level content into indented files.
 
 EXAMPLES:
     # Replace a function call
@@ -74,6 +79,9 @@ EXAMPLES:
 
     # Auto-indent unindented LLM output
     sniper file.rs 10 10 $(echo 'print("hello")' | sniper encode --stdin) --auto-indent
+
+    # Context-verified edit (rejects if surrounding code changed)
+    sniper file.rs 10 10 7878 --context 1a2b3c4d5e6f7a8b
 
 CONFIGURATION:
     SNIPER_LOCK_TIMEOUT             Lock timeout in seconds (default: 30, min: 1)

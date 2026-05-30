@@ -73,6 +73,7 @@ impl SniperConfig {
     }
 
     /// Get lock timeout in milliseconds.
+    #[allow(clippy::cast_possible_truncation)] // Duration::as_millis() fits u64 for timeout values
     pub fn lock_timeout_ms(&self) -> u64 {
         self.lock_timeout.as_millis() as u64
     }

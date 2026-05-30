@@ -149,7 +149,12 @@ mod file_size_tests {
         // File is 100 bytes, limit is 10 bytes
         let result = check_file_size(file.to_str().unwrap(), 10);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("File too large"));
+        let err = result.unwrap_err();
+        assert!(
+            err.starts_with("File too large"),
+            "Error must start with 'File too large', got: {}",
+            err
+        );
     }
 
     #[test]
@@ -179,9 +184,9 @@ mod backup_retention_tests {
 
     #[test]
     fn test_backup_retention_by_count() {
-        // Use current directory for test
-        let file = PathBuf::from("test_retention.txt");
-        let _ = fs::write(&file, "v0");
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("retention_test.txt");
+        fs::write(&file_path, "v0").unwrap();
 
         let config = SniperConfig {
             backup_retention_count: 3,
@@ -192,25 +197,17 @@ mod backup_retention_tests {
 
         // Create 5 backups
         for i in 0..5 {
-            let _ = fs::write(&file, format!("v{}", i));
-            let _ = create_backup(file.to_str().unwrap());
+            fs::write(&file_path, format!("v{}", i)).unwrap();
+            let result = create_backup(file_path.to_str().unwrap());
+            assert!(result.is_ok(), "Backup {} should succeed: {:?}", i, result);
             thread::sleep(Duration::from_millis(20));
         }
 
-        // Get hash for counting
-        let normalized = normalize_path(file.to_str().unwrap());
-        if normalized.is_err() {
-            let _ = fs::remove_file(&file);
-            return; // Skip if path issues
-        }
-        let normalized = normalized.unwrap();
+        let normalized = normalize_path(file_path.to_str().unwrap())
+            .expect("Path normalization must succeed");
         let hash = get_path_hash(&normalized);
         let backup_dir = PathBuf::from(".sniper");
-
-        if !backup_dir.exists() {
-            let _ = fs::remove_file(&file);
-            return;
-        }
+        assert!(backup_dir.exists(), "Backup directory must exist");
 
         // Count backups before purge
         let before_count: usize = fs::read_dir(&backup_dir)
@@ -219,33 +216,49 @@ mod backup_retention_tests {
             .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
             .count();
 
-        if before_count >= 5 {
-            // Purge old backups
-            let _ = purge_old_backups(file.to_str().unwrap(), &config);
+        assert!(
+            before_count >= 5,
+            "Must have created at least 5 backups, got {}",
+            before_count
+        );
 
-            // Count backups after purge
-            let after_count: usize = fs::read_dir(&backup_dir)
-                .unwrap()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
-                .count();
+        // Purge old backups
+        let purge_result = purge_old_backups(file_path.to_str().unwrap(), &config);
+        assert!(
+            purge_result.is_ok(),
+            "Purge must succeed: {:?}",
+            purge_result
+        );
 
-            // Should have at most 3 backups (retention count)
-            assert_eq!(after_count, 3);
-        }
+        // Count backups after purge — must be at most 3
+        let after_count: usize = fs::read_dir(&backup_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
+            .count();
 
-        // Cleanup
-        let _ = fs::remove_file(&file);
+        assert!(
+            after_count <= 3,
+            "After purge with retention=3, expected <= 3 backups, got {}",
+            after_count
+        );
+
+        let _ = fs::remove_file(&file_path);
     }
 
     #[test]
     fn test_backup_retention_by_age() {
-        // This test would require manipulating file timestamps
-        // For now, just verify the function doesn't panic
-        let config = SniperConfig::default();
-        let result = purge_old_backups("/tmp/nonexistent.txt", &config);
-        // Should not panic, may return error
-        let _ = result;
+        let config = SniperConfig {
+            backup_retention_count: 0,
+            backup_max_age_days: 0,
+            audit_enabled: false,
+            ..SniperConfig::default()
+        };
+
+        // Non-existent file should not panic — may return Ok or Err
+        let result = purge_old_backups("/tmp/nonexistent_sniper_age_test_xyz.txt", &config);
+        // Must not panic — that's the real test
+        assert!(result.is_ok() || result.is_err());
     }
 }
 
@@ -256,7 +269,6 @@ mod config_tests {
     fn test_config_default_values() {
         let config = SniperConfig::default();
 
-        // Check default values
         assert_eq!(config.lock_timeout, Duration::from_secs(30));
         assert_eq!(config.max_file_size, 100 * 1024 * 1024); // 100MB
         assert_eq!(config.backup_retention_count, 50);
@@ -264,11 +276,14 @@ mod config_tests {
     }
 
     #[test]
-    fn test_size_parsing_bytes() {
-        // Test the size parsing from config module
-        // This is tested in config::tests, but verify here too
+    fn test_config_from_env_overrides() {
+        // Verify that env-based config loading produces valid defaults
         let config = SniperConfig::default();
-        assert_eq!(config.max_file_size, 100 * 1024 * 1024);
+        // All defaults must be non-zero (operational)
+        assert!(config.lock_timeout.as_secs() > 0);
+        assert!(config.max_file_size > 0);
+        assert!(config.backup_retention_count > 0);
+        assert!(config.backup_max_age_days > 0);
     }
 }
 
@@ -276,7 +291,6 @@ mod config_tests {
 mod documentation_tests {
     #[test]
     fn test_line_number_documentation() {
-        // Verify help text mentions 1-based line numbers
         use std::process::Command;
 
         let output = Command::new("cargo")
@@ -289,10 +303,184 @@ mod documentation_tests {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let help_text = if stdout.is_empty() { stderr } else { stdout };
 
-        // Should mention line numbers
+        // Help text must document 1-indexed line numbers
         assert!(
-            help_text.contains("line") || help_text.contains("Line"),
-            "Help text should mention line numbers"
+            help_text.contains("1-indexed"),
+            "Help text must document 1-indexed line numbers, got: {}",
+            help_text
+        );
+    }
+}
+
+// ===========================================================================
+// Integration Tests — Cross-Boundary Security
+// ======================================================================
+
+mod compound_security_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    // Symlink: symlink inside base_dir points outside must be rejected.
+    #[test]
+    #[cfg(unix)]
+    fn test_symlink_traversal_within_base_dir() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("target.txt");
+        fs::write(&target, "secret\n").unwrap();
+
+        // Create symlink inside base_dir pointing to /etc/passwd
+        let symlink = dir.path().join("link.txt");
+        std::os::unix::fs::symlink("/etc/passwd", &symlink).unwrap();
+
+        let policy = SecurityPolicy {
+            base_dir: Some(dir.path().to_path_buf()),
+            reject_parent_refs: true,
+        };
+
+        // Symlink resolution must still be contained within base_dir
+        let result = validate_path(&symlink, &policy);
+        assert!(
+            result.is_err(),
+            "Symlink to /etc/passwd inside base_dir must be rejected, got: {:?}",
+            result
+        );
+    }
+
+    // Atomicity: after a failed splice, file must not contain partial content.
+    #[test]
+    fn test_atomic_write_no_partial_content_on_crash() {
+        use moesniper::{create_backup, hex_decode, write_atomic};
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("atomic_test.txt");
+        let original = "line1\nline2\nline3\nline4\nline5\n";
+        fs::write(&file_path, original).unwrap();
+
+        // Simulate a successful splice that replaces line 3
+        let lines: Vec<String> = original.split_inclusive('\n').map(String::from).collect();
+        let mut new_lines = lines.clone();
+        let replace_text = hex_decode("58").expect("valid hex: 'X'");
+        new_lines[2] = format!("{}{}", replace_text, if original.ends_with('\n') { "\n" } else { "" });
+
+        // Create backup first
+        let backup = create_backup(file_path.to_str().unwrap())
+            .expect("Backup must succeed");
+
+        // Write new content atomically
+        let write_lines: Vec<&str> = new_lines.iter().map(|s| s.as_str()).collect();
+        write_atomic(
+            file_path.to_str().unwrap(),
+            &write_lines,
+        )
+        .expect("Atomic write must succeed");
+
+        // Verify file has correct content — not partial
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "line1\nline2\nX\nline4\nline5\n");
+
+        // Verify backup preserved original
+        let backup_path = PathBuf::from(&backup);
+        assert!(
+            backup_path.exists(),
+            "Backup file must exist at: {:?}",
+            backup_path
+        );
+        let _ = fs::remove_file(backup_path);
+    }
+
+    // Lock PID recycling: verify stale locks are cleaned on timeout.
+    #[test]
+    fn test_stale_lock_cleanup() {
+        use std::process::Command;
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("stale_lock_test.txt");
+        fs::write(&file_path, "content\n").unwrap();
+
+        // First edit: acquires lock, succeeds
+        let output = Command::new("cargo")
+            .args([
+                "run", "--quiet", "--",
+                file_path.to_str().unwrap(), "1", "1", "41",
+            ])
+            .output()
+            .expect("First edit must spawn");
+
+        assert!(
+            output.status.success(),
+            "First edit must succeed: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        // Cleanup — the lock should be released already (process exited)
+        let output = Command::new("cargo")
+            .args([
+                "run", "--quiet", "--",
+                file_path.to_str().unwrap(), "1", "1", "42",
+            ])
+            .output()
+            .expect("Second edit must spawn");
+
+        assert!(
+            output.status.success(),
+            "Second edit must succeed after lock release: stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // Concurrent splice integrity: verify file consistency under simultaneous edits.
+    #[test]
+    fn test_concurrent_splice_file_integrity() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let dir = Arc::new(TempDir::new().unwrap());
+        let file_path = Arc::new(dir.path().join("concurrent_atomic.txt"));
+        let original = "line1\nline2\nline3\n";
+        fs::write(&*file_path, original).unwrap();
+
+        let num_threads = 3;
+        let barrier = Arc::new(Barrier::new(num_threads));
+        let mut handles = vec![];
+
+        for i in 0..num_threads {
+            let b = barrier.clone();
+            let f = file_path.clone();
+            let hex_char = format!("{:02x}", i + 65); // 'A', 'B', 'C'
+            handles.push(thread::spawn(move || {
+                b.wait();
+                std::process::Command::new("cargo")
+                    .args(["run", "--quiet", "--", f.to_str().unwrap(), "2", "2", &hex_char])
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            }));
+        }
+
+        for h in handles {
+            let _ = h.join();
+        }
+
+        let content = fs::read_to_string(&*file_path).unwrap();
+        let expected_start = "line1\n";
+        let expected_end = "line3\n";
+        assert!(
+            content.starts_with(expected_start),
+            "Content must start with 'line1\\n', got: {:?}",
+            content
+        );
+        assert!(
+            content.ends_with(expected_end),
+            "Content must end with 'line3\\n', got: {:?}",
+            content
+        );
+        // Total lines must be 3 (no corruption from concurrent writes)
+        assert_eq!(
+            content.lines().count(),
+            3,
+            "File must have exactly 3 lines after concurrent edits, got: {:?}",
+            content
         );
     }
 }

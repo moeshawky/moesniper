@@ -1,0 +1,15 @@
+# Clippy configuration for moesniper
+# Enterprise-grade linting tuned for a security-focused CLI tool.
+#
+# Policy:
+#   CI runs: cargo clippy --all-targets -- -D warnings
+#   This file + [lints.clippy] in Cargo.toml enforce standards beyond defaults.
+
+# --- Toolchain ---
+msrv = "1.87"
+
+# --- Complexity ---
+# Result<String, String> is a common pattern in this project (not truly complex).
+# Threshold set high to avoid false positives on error-handling return types.
+type-complexity-threshold = 50
+cognitive-complexity-threshold = 30

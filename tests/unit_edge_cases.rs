@@ -1,4 +1,4 @@
-//! Unit tests for G-EDGE failure mode
+//! Edge case tests
 use std::fs;
 use tempfile::TempDir;
 
@@ -9,6 +9,7 @@ fn create_test_file(content: &str) -> (TempDir, std::path::PathBuf) {
     (dir, file_path)
 }
 
+// Empty file splice
 #[test]
 fn test_edge_case_empty_file() {
     let (_dir, file_path) = create_test_file("");
@@ -24,14 +25,25 @@ fn test_edge_case_empty_file() {
         ])
         .output()
         .unwrap();
+
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("thread 'main' panicked"));
+    assert!(
+        !stderr.contains("panicked"),
+        "Empty file splice must not panic: {}",
+        stderr
+    );
+    // Inserting into empty file should succeed or return a meaningful error
+    let content_after = fs::read_to_string(&file_path).unwrap_or_default();
+    if output.status.success() {
+        assert_eq!(content_after, "\n", "Empty file + hex 41 should produce newline");
+    }
 }
 
+// Single char file — replace with different content
 #[test]
 fn test_edge_case_single_char() {
     let (_dir, file_path) = create_test_file("x");
-    let _ = std::process::Command::new("cargo")
+    let output = std::process::Command::new("cargo")
         .args([
             "run",
             "--quiet",
@@ -43,8 +55,23 @@ fn test_edge_case_single_char() {
         ])
         .output()
         .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("panicked"),
+        "Single char splice must not panic: {}",
+        stderr
+    );
+    assert!(
+        output.status.success(),
+        "Single char splice should succeed: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let content_after = fs::read_to_string(&file_path).unwrap();
+    assert_eq!(content_after, "B", "Single char 'x' replaced with hex 42 ('B')");
 }
 
+// Very long line (100K chars)
 #[test]
 fn test_edge_case_very_long_line() {
     let long_content = "x".repeat(100_000);
@@ -61,10 +88,20 @@ fn test_edge_case_very_long_line() {
         ])
         .output()
         .unwrap();
+
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("thread 'main' panicked"));
+    assert!(
+        !stderr.contains("panicked"),
+        "100K char line must not panic: {}",
+        stderr
+    );
+    assert!(
+        output.status.success(),
+        "100K char line splice should succeed"
+    );
 }
 
+// Unicode content
 #[test]
 fn test_edge_case_unicode() {
     let (_dir, file_path) = create_test_file("مرحبا");
@@ -80,10 +117,22 @@ fn test_edge_case_unicode() {
         ])
         .output()
         .unwrap();
+
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("thread 'main' panicked"));
+    assert!(
+        !stderr.contains("panicked"),
+        "Unicode content must not panic: {}",
+        stderr
+    );
+    // Unicode file should be handled gracefully
+    assert!(
+        output.status.success(),
+        "Unicode splice should succeed: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }
 
+// Line zero must always fail (1-indexed)
 #[test]
 fn test_edge_case_line_zero() {
     let (_dir, file_path) = create_test_file("test\n");
@@ -99,9 +148,13 @@ fn test_edge_case_line_zero() {
         ])
         .output()
         .unwrap();
-    assert!(!output.status.success());
+    assert!(
+        !output.status.success(),
+        "Line 0 must be rejected (1-indexed system)"
+    );
 }
 
+// Beyond EOF must fail
 #[test]
 fn test_edge_case_beyond_eof() {
     let (_dir, file_path) = create_test_file("line1\n");
@@ -117,5 +170,8 @@ fn test_edge_case_beyond_eof() {
         ])
         .output()
         .unwrap();
-    assert!(!output.status.success());
+    assert!(
+        !output.status.success(),
+        "Line 100 in 1-line file must be rejected"
+    );
 }

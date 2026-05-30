@@ -27,8 +27,8 @@ sniper file.rs --undo
 | **Multi-step undo** | Each edit creates a backup; `--undo` pops the stack |
 | **Manifest operations** | Batch JSON operations applied bottom-up (line numbers never shift) |
 | **Dry-run preview** | `--dry-run` shows diff with `+`/`-`/`~` markers before applying |
-| **Auto-indent** | `--auto-indent` detects expected indentation from context and fixes unindented LLM output |
-| **Validate-indent** | `--validate-indent` warns on indentation mismatch without modifying content |
+| **Indentation safety** | Validation blocks mis-indented edits; `--auto-indent` fixes them, `--force-indent` bypasses |
+| **Context verification** | `--context <hash>` verifies SHA-256 of surrounding lines before applying |
 | **PID file locks** | Per-file locks with stale PID detection — auto-recovery if previous process died |
 | **Metabolic pacing** | `llmosafe 0.6.2` `ResourceGuard::auto(0.5)` — adaptive back-pressure based on RSS, IO wait, and load |
 | **Path traversal protection** | `..` components rejected, `SecurityPolicy` guards all file access |
@@ -39,12 +39,13 @@ sniper file.rs --undo
 ## Usage
 
 ```
-sniper <file> <start> <end> <hex>       Replace lines
-sniper <file> <start> <end> --delete    Delete lines
-sniper <file> --manifest <path>         Batch operations (JSON)
-sniper <file> --undo                    Restore from backup
-sniper encode [--stdin|<text>]          Hex-encode content
-sniper encode --file <path>             Encode file contents
+sniper <file> <start> <end> <hex>                Replace lines with hex content
+sniper <file> <start> <end> --delete             Delete line range
+sniper <file> <start> <end> --stdin              Read content from stdin
+sniper <file> <start> <end> <hex> --context <h>  Replace with context verification
+sniper <file> --manifest <path>                  Batch operations (JSON)
+sniper <file> --undo                             Restore from backup
+sniper encode [--stdin|--file <path>|<text>]      Hex-encode content
 ```
 
 ### Flags
@@ -54,8 +55,9 @@ sniper encode --file <path>             Encode file contents
 | `--dry-run` | Preview changes without writing |
 | `--json` | Output machine-readable JSON |
 | `--stdin` | Read content from stdin instead of hex arg |
-| `--auto-indent` | Auto-detect and apply indentation |
-| `--validate-indent` | Warn on indentation mismatch (dry-run only blocks non-dry-run) |
+| `--context <hash>` | Verify SHA-256 hash (first 16 hex chars) of lines before/after edit target |
+| `--auto-indent` | Auto-detect and apply indentation from context |
+| `--force-indent` | Bypass indentation validation (allow unindented content) |
 
 ### Encoding
 
@@ -94,6 +96,9 @@ echo '[{"start":1,"end":1,"hex":"78"}]' | sniper file.rs --manifest /dev/stdin
 
 # Insert at end of file
 sniper file.rs 4 3 $(echo 'new_line' | sniper encode --stdin)
+
+# Context-verified edit (rejects if surrounding code changed)
+sniper file.rs 10 10 7878 --context 1a2b3c4d5e6f7a8b
 ```
 
 ## Configuration
@@ -111,10 +116,31 @@ sniper file.rs 4 3 $(echo 'new_line' | sniper encode --stdin)
 1. **Path validation** — `normalize_path()` rejects `..` traversal and canonicalizes
 2. **File size check** — rejects files exceeding `SNIPER_MAX_FILE_SIZE`
 3. **Lock acquisition** — PID file lock with configurable timeout; stale PID detection recovers from crashed processes
-4. **Backup** — file copied to `.sniper/` with hash+timestamp name
-5. **Splice** — lines loaded into memory, range replaced, result written atomically (temp file + rename)
-6. **Metabolic pacing** — `llmosafe` checks RSS, IO wait, load average; sleeps if system is under pressure
-7. **Purge** — old backups pruned by count and age per retention policy
+4. **Context verification** — optional `--context <sha256>` flag hashes 3 lines before and 3 lines after the edit target; if the context changed since the agent computed line numbers, the edit is rejected with a "context mismatch" error
+5. **Backup** — file copied to `.sniper/` with hash+timestamp name
+6. **Splice** — lines loaded into memory, range replaced, result written atomically (temp file + rename)
+7. **Metabolic pacing** — `llmosafe` checks RSS, IO wait, load average; sleeps if system is under pressure
+8. **Purge** — old backups pruned by count and age per retention policy
+
+## JSON Output
+
+The `--json` flag produces a CliResult object with these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | string | `ok`, `dry_run`, `restored`, `encoded`, or `error` |
+| `file` | string | Target file path |
+| `message` | string | Error message (on failure) or encoded hex (on encode) |
+| `lines_removed` | number | Number of lines removed |
+| `lines_inserted` | number | Number of lines inserted |
+| `line_shift` | number | Net line change (`lines_inserted - lines_removed`); positive = lines moved down |
+| `total_lines` | number | Total lines in file after edit |
+| `operations` | number | Number of manifest operations applied |
+| `backup` | string | Path to backup file created |
+| `ai_hint` | string | Suggestion for the LLM agent |
+| `diff_preview` | array | Dry-run diff with `+`/`-`/`~` markers |
+| `indent_warning` | string | Indentation mismatch warning |
+| `indent_fixed` | boolean | Whether auto-indent was applied |
 
 ## Contributing
 

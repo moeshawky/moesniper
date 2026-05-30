@@ -11,24 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 
 #### Indentation Intelligence
 - Auto-indent (`--auto-indent`): Detects expected indentation from surrounding context and automatically prepends missing leading whitespace. Statistical step detection with 80% supermajority, raw frequency scoring, round-to-nearest, whitespace stripping, and smaller-is-step tiebreaker — robust against "stupid indentation" from LLM output.
-- Validate-indent (`--validate-indent`): Checks for indentation mismatch without modifying content. Blocks non-dry-run edits on mismatch.
+- Validate-indent (`--validate-indent`): Checks for indentation mismatch without modifying content. Blocks non-dry-run edits on mismatch. **Removed in 0.6.0** — validation is now always-on with `--force-indent` as the opt-out.
 - Complete indent engine rewrite (`src/indent.rs`) with 40 adversarial tests covering tabs, spaces, mixed styles, blank lines, continuation lines, brace openers, and LLM-grade inconsistent spacing.
 
-#### Lock Hardening (CBP-1)
+#### Lock Hardening
 - PID-based lock files: lock content contains the process PID, enabling stale lock detection.
 - Stale lock auto-recovery: On timeout, reads lock PID, checks `/proc/{pid}` liveness. Dead process → remove lock and retry. Garbage/non-numeric lock content treated as "not stale" (safe default).
 - Configurable lock timeout via `SNIPER_LOCK_TIMEOUT`.
 
-#### Secure Temp Files (CBP-3)
+#### Secure Temp Files
 - Nanosecond timestamp suffix on temp files (`{filepath}.sniper_tmp.{ts}`) instead of fixed name, preventing collision.
 
-#### Path Validation Order (CBP-4)
+#### Path Validation Order
 - `normalize_path` called before `check_file_size` in both `cmd_splice` and `cmd_manifest_impl`, eliminating a TOCTOU window between path validation and file operations.
 
 #### Comprehensive Test Suite
-- CBP boundary tests (`tests/cbp_boundary_tests.rs`): 29 tests covering PID lock acquisition, stale lock recovery, temp file uniqueness, path ordering, hex edge cases, backup contract, manifest validation, and concurrent lock purge.
+- Boundary verification tests (`tests/boundary_tests.rs`): 29 tests covering PID lock acquisition, stale lock recovery, temp file uniqueness, path ordering, hex edge cases, backup contract, manifest validation, and concurrent lock purge.
 - Regression golden file tests — undo stack behavior baseline, newline preservation, manifest regression detection.
-- 171 total tests (19 lib, 81 main, 29 CBP, 15 enterprise, 6 integration, 5 property, 5 regression, 5 smoke, 6 unit edge).
+- 184 total tests (19 lib, 90 main, 29 boundary, 19 enterprise, 6 integration, 6 unit edge, 5 property, 5 regression, 5 smoke).
 
 ### Changed
 
@@ -37,22 +37,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 - **Clippy clean**: `field_reassign_with_default` fixed, `if_same_then_else` blocks merged, `is_multiple_of()` used instead of manual mod.
 - **MSRV**: 1.70 → 1.87 (`is_multiple_of` stabilized in Rust 1.87).
 - **Cargo.toml**: Added `rust-version = "1.87"` for MSRV discoverability.
-- **Documentation**: `CHANGELOG.md`, `README.md` rewritten with v0.6.0 feature coverage. Help text expanded with `--stdin`, `--validate-indent`, auto-indent, and env var reference. Root docs consolidated into `docs/`.
+- **Documentation**: `CHANGELOG.md`, `README.md` rewritten with v0.6.0 feature coverage. Help text expanded with `--stdin`, `--context`, `--force-indent`, auto-indent, and env var reference. Root docs consolidated into `docs/`.
 
 ### Security
 
 - Path traversal protection (`SecurityPolicy`, `normalize_path`) — CWE-22 covered.
 - Symlink-safe operations (no `follow_symlinks` without validation).
-- PID-based per-file locking with stale lock auto-recovery (CBP-1).
-- Atomic writes with unique temp file names (CBP-3).
+- PID-based per-file locking with stale lock auto-recovery.
+- Atomic writes with unique temp file names.
 
 ### Audit
 
-- **CAM structural audit**: 21 pub exports verified, zero dead code, all 5 config fields consumed.
-- **CAM G-* execution audit**: All 9 modes pass. No CWE patterns. Clippy clean.
-- **CBP boundary audit**: 10 boundaries mapped, 3 low-severity accepted findings, zero compound cascades.
-- **Publish signal**: GREEN — `cargo publish --dry-run` passes, 171 tests, 0 failures.
-- **WD-40 cleanup**: Workspace 1.2GB → 362MB. Removed `libc` dead dep, `target/` build artifacts, `.sniper/` 25K backup files, `.ix/` search cache.
+- **Structural audit**: All pub exports verified, zero dead code, all config fields consumed.
+- **Publish signal**: GREEN — `cargo publish --dry-run` passes, 184 tests, 0 failures.
 
 ---
 
@@ -142,7 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 
 | Version | Date | Key Feature |
 |---------|------|-------------|
-| 0.6.0 | 2026-05-28 | Indent engine, PID locks, CBP hardening, llmosafe 0.6.2, 171 tests |
+| 0.6.0 | 2026-05-28 | Indent engine, PID locks, lock hardening, llmosafe 0.6.2, 184 tests |
 | 0.5.1 | 2026-05-14 | Test suite expansion, help text refactor |
 | 0.5.0 | 2026-05-14 | Enterprise security + auto-indent + dry-run |
 | 0.4.0 | 2025-04-22 | Manifest operations + multi-step undo |

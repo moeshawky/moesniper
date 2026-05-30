@@ -176,7 +176,14 @@ pub fn detect_expected_indent(
     start_line: usize,
     _end_line: usize,
 ) -> (IndentStyle, usize) {
-    let style = detect_indent_style(all_lines);
+    let idx = start_line.saturating_sub(1);
+    let window_start = idx.saturating_sub(MAX_SCAN_BACK);
+    let window = &all_lines[window_start..idx];
+    let style = if window.len() >= 3 {
+        detect_indent_style(window)
+    } else {
+        detect_indent_style(all_lines)
+    };
     let step = if style.uses_tabs {
         1
     } else {
@@ -221,12 +228,11 @@ pub fn detect_expected_indent(
         let trimmed = line.trim_end();
         let trimmed_no_comment = strip_trailing_comment(trimmed);
 
-        // Block/continuation opener: `{`, `:`, `(`, `[`, `,` → expect indent increase
+        // Block/continuation opener: `{`, `:`, `(`, `[` → expect indent increase
         if trimmed_no_comment.ends_with('{')
             || trimmed_no_comment.ends_with(':')
             || trimmed_no_comment.ends_with('(')
             || trimmed_no_comment.ends_with('[')
-            || trimmed_no_comment.ends_with(',')
         {
             context_level += 1;
         }
@@ -258,6 +264,7 @@ fn context_line_before(all_lines: &[String], start_line: usize) -> Option<&Strin
 /// - Off by 1 or 2: +5 (slightly anomalous, still usable)
 /// - Block opener/closer line: +0 (reliable but may need level adjustment)
 /// - Deeply indented lines: bonus (more structural, harder to be LLM noise)
+#[allow(clippy::cast_possible_truncation)] // .min(5) guarantees value fits in i32
 fn context_quality(leading: usize, step: usize, _line: &str) -> i32 {
     if step == 0 {
         return 0;
@@ -322,6 +329,10 @@ pub fn validate_indentation(
 
     for line in replacement_lines.iter().filter(|l| !l.trim().is_empty()) {
         has_content = true;
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(')') || trimmed.starts_with('}') || trimmed.starts_with(']') {
+            continue;
+        }
         let leading = line.chars().take_while(|c| c.is_whitespace()).count();
         min_leading = min_leading.min(leading);
     }
@@ -646,18 +657,34 @@ mod tests {
     }
 
     #[test]
-    fn test_expected_indent_after_trailing_comma() {
-        let all_lines = vec![
+    fn test_indent_step_from_window_not_global_file() {
+        let mut lines: Vec<String> = vec![
             "fn main() {\n".to_string(),
-            "    my_function(\n".to_string(),
-            "        arg1,\n".to_string(),
-            "        arg2,\n".to_string(),
+            "    let x = 1;\n".to_string(),
+            "    let y = 2;\n".to_string(),
         ];
-        let (_, level) = detect_expected_indent(&all_lines, 5, 5);
-        // Previous line ends with `,` → continuation, expect same or deeper
-        assert!(
-            level >= 2,
-            "Content after continuation line should keep indent"
+        for _ in 0..100 {
+            lines.push("        deep_body();\n".to_string());
+        }
+        lines.push("    // editing here\n".to_string());
+
+        let (style, _) = detect_expected_indent(&lines, 5, 5);
+        assert_eq!(
+            style.spaces, 4,
+            "Edit near 4-space context should detect 4-space step, not 8 (deep body bias)"
+        );
+    }
+
+    #[test]
+    fn test_expected_indent_after_trailing_comma() {
+        let mut all_lines: Vec<String> = (0..20).map(|_| "    let x = 1;\n".to_string()).collect();
+        all_lines.push("    my_function(\n".to_string());
+        all_lines.push("        arg1,\n".to_string());
+        all_lines.push("        arg2,\n".to_string());
+        let (_, level) = detect_expected_indent(&all_lines, 24, 24);
+        assert_eq!(
+            level, 2,
+            "Comma means same-level continuation, not deeper indent"
         );
     }
 
@@ -822,6 +849,40 @@ mod tests {
         let replacement = vec!["    ".to_string(), "print('x')".to_string()];
         let (valid, _warning, _fix) = validate_indentation(&all_lines, 2, 2, &replacement);
         assert!(!valid);
+    }
+
+    #[test]
+    fn test_validate_indentation_closer_tokens_at_lower_indent() {
+        let all_lines = vec![
+            "fn outer() {\n".to_string(),
+            "    if true {\n".to_string(),
+            "        do_thing();\n".to_string(),
+            "    }\n".to_string(),
+            "}\n".to_string(),
+        ];
+        let replacement = vec![
+            "        more_code();\n".to_string(),
+            "    }\n".to_string(),
+            "}\n".to_string(),
+        ];
+        let (valid, warning, _fix) = validate_indentation(&all_lines, 3, 5, &replacement);
+        assert!(
+            valid,
+            "Closer tokens at lower indent are correct, got warning: {:?}",
+            warning
+        );
+    }
+
+    #[test]
+    fn test_validate_indentation_closer_tokens_at_lower_indent_single_line() {
+        let all_lines = vec![
+            "fn outer() {\n".to_string(),
+            "    let x = 1;\n".to_string(),
+            "}\n".to_string(),
+        ];
+        let replacement = vec!["}".to_string()];
+        let (valid, _warning, _fix) = validate_indentation(&all_lines, 2, 2, &replacement);
+        assert!(valid, "Single closing brace at lower indent is correct");
     }
 
     // ============================================================

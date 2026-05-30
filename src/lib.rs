@@ -1,3 +1,7 @@
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 pub mod config;
 pub mod security;
 
@@ -11,6 +15,7 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 
 use llmosafe::ResourceGuard;
+use sha2::Digest;
 
 pub const BACKUP_DIR: &str = ".sniper";
 
@@ -274,6 +279,74 @@ fn write_atomic_impl<S: AsRef<str>>(
     }
 }
 
+/// Verify pre-edit context: hash 3 lines before start and 3 lines after end,
+/// compare against the expected hash. Returns Ok if match, Err with message if not.
+pub fn verify_context(
+    lines: &[String],
+    start: usize,
+    end: usize,
+    expected_hash: &str,
+) -> Result<(), String> {
+    let before_start = start.saturating_sub(1).saturating_sub(3);
+    let before_end = (start.saturating_sub(1)).min(lines.len());
+    let after_start = end;
+    let after_end = (end + 3).min(lines.len());
+
+    let mut hasher = sha2::Sha256::new();
+    for i in before_start..before_end {
+        if i < lines.len() {
+            hasher.update(lines[i].as_bytes());
+        }
+    }
+    for i in after_start..after_end {
+        if i < lines.len() {
+            hasher.update(lines[i].as_bytes());
+        }
+    }
+    let hash = hasher.finalize();
+    let actual_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+    let actual_short = &actual_hex[..16];
+
+    if actual_short == expected_hash {
+        Ok(())
+    } else {
+        Err(format!(
+            "context mismatch: content around line {} changed. Re-read the file and retry.",
+            start
+        ))
+    }
+}
+
+/// Counts backups for a file hash created within the last `window_secs` seconds.
+/// Returns the count of recent backups. Used for manifest promotion detection.
+pub fn count_recent_backups(filepath: &str, window_secs: u64) -> Result<usize, String> {
+    let normalized = normalize_path(filepath)?;
+    let hash = get_path_hash(&normalized);
+    let dir = PathBuf::from(BACKUP_DIR);
+
+    if !dir.exists() {
+        return Ok(0);
+    }
+
+    let now = SystemTime::now();
+    let cutoff = now - Duration::from_secs(window_secs);
+
+    let count = fs::read_dir(&dir)
+        .map_err(|e| format!("read backup dir: {e}"))?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
+        .filter(|e| {
+            e.metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .map(|t| t > cutoff)
+                .unwrap_or(false)
+        })
+        .count();
+
+    Ok(count)
+}
+
 /// Centralized handling for llmosafe Backtrack Signal (-7).
 ///
 /// In llmosafe 0.6.2+, resource exhaustion surfaces via `KernelError` from
@@ -405,59 +478,54 @@ mod tests {
     fn test_purge_old_backups_by_count() {
         use std::thread;
 
-        // Create test file in current directory for backup test
         let file = PathBuf::from("test_purge_backup.txt");
-        let _ = fs::write(&file, "test");
+        fs::write(&file, "v0").unwrap();
 
-        // Create config with retention of 3
         let config = SniperConfig {
             backup_retention_count: 3,
             backup_max_age_days: 0,
             ..SniperConfig::default()
         };
 
-        // Create multiple backups
-        for _ in 0..5 {
-            let result = create_backup(file.to_str().unwrap());
-            if result.is_err() {
-                break; // If we can't create backups, skip test
-            }
+        // Create 5 backups
+        for i in 1..=5 {
+            fs::write(&file, format!("v{}", i)).unwrap();
+            create_backup(file.to_str().unwrap())
+                .expect("Backup creation must succeed");
             thread::sleep(Duration::from_millis(10));
         }
 
-        // Count backups before purge
-        let normalized = normalize_path(file.to_str().unwrap());
-        if normalized.is_err() {
-            let _ = fs::remove_file(&file);
-            return; // Skip test if path normalization fails
-        }
-        let normalized = normalized.unwrap();
+        let normalized = normalize_path(file.to_str().unwrap())
+            .expect("Path normalization must succeed");
         let hash = get_path_hash(&normalized);
         let backup_dir = PathBuf::from(BACKUP_DIR);
+        assert!(backup_dir.exists(), "Backup dir must exist after creating backups");
 
-        if backup_dir.exists() {
-            let before_count: usize = fs::read_dir(&backup_dir)
-                .unwrap()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
-                .count();
+        let before_count: usize = fs::read_dir(&backup_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
+            .count();
+        assert!(
+            before_count >= 5,
+            "Must have created at least 5 backups, got {}",
+            before_count
+        );
 
-            if before_count >= 5 {
-                // Purge
-                let _ = purge_old_backups(file.to_str().unwrap(), &config);
+        purge_old_backups(file.to_str().unwrap(), &config)
+            .expect("Purge must succeed");
 
-                // Count backups after purge
-                let after_count: usize = fs::read_dir(&backup_dir)
-                    .unwrap()
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
-                    .count();
+        let after_count: usize = fs::read_dir(&backup_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
+            .count();
+        assert!(
+            after_count <= 3,
+            "After purge with retention=3, expected <= 3 backups, got {}",
+            after_count
+        );
 
-                assert_eq!(after_count, 3);
-            }
-        }
-
-        // Cleanup
         let _ = fs::remove_file(&file);
     }
 

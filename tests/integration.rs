@@ -186,6 +186,18 @@ fn test_concurrency_locking() {
     assert!(results.iter().any(|&r| r));
 
     let final_content = fs::read_to_string(&*file_path).unwrap();
-    assert!(!final_content.is_empty());
-    // The history stack should also be consistent (no duplicated timestamps or half-written files)
+    // File must contain exactly one line with a single uppercase letter
+    // (one thread won, others failed due to lock contention)
+    let trimmed = final_content.trim();
+    assert_eq!(
+        trimmed.len(),
+        1,
+        "File must contain exactly one char after concurrent edit, got: {:?}",
+        trimmed
+    );
+    assert!(
+        trimmed.chars().next().unwrap().is_ascii_uppercase(),
+        "Content must be an uppercase letter (A-E), got: {:?}",
+        trimmed
+    );
 }

@@ -1,4 +1,4 @@
-//! Golden file regression tests - G-DRIFT failure mode
+//! Golden file regression tests
 //! Detects when behavior drifts from known-good baseline
 
 use std::fs;
@@ -16,7 +16,7 @@ fn normalize(s: &str) -> String {
     s.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-// G-DRIFT: Undo stack behavior matches golden file
+// Undo stack behavior matches golden file
 #[test]
 fn test_golden_undo_stack() {
     let dir = TempDir::new().unwrap();
@@ -43,7 +43,7 @@ fn test_golden_undo_stack() {
     );
 }
 
-// G-DRIFT: Basic splice operation
+// Basic splice operation
 #[test]
 fn test_golden_splice_basic() {
     let dir = TempDir::new().unwrap();
@@ -67,7 +67,7 @@ fn test_golden_splice_basic() {
     );
 }
 
-// G-DRIFT: Newline preservation behavior
+// Newline preservation behavior
 #[test]
 fn test_golden_newline_preservation() {
     let dir = TempDir::new().unwrap();
@@ -94,7 +94,7 @@ fn test_golden_newline_preservation() {
     );
 }
 
-// G-DRIFT: Manifest operation baseline
+// Manifest operation baseline
 #[test]
 fn test_golden_manifest_basic() {
     let dir = TempDir::new().unwrap();
@@ -117,13 +117,15 @@ fn test_golden_manifest_basic() {
     assert!(status.success(), "Manifest operation should succeed");
 
     let content = fs::read_to_string(&file_path).unwrap();
-    // After deleting line 2, should have "line1\nline3\n"
-    assert!(content.contains("line1"), "Should keep line 1");
-    assert!(!content.contains("line2"), "Should delete line 2");
-    assert!(content.contains("line3"), "Should keep line 3");
+    // After deleting line 2 from "line1\nline2\nline3\n", result must be exact
+    assert_eq!(
+        content, "line1\nline3\n",
+        "Manifest delete line 2 must produce exact output, got: {:?}",
+        content
+    );
 }
 
-// G-DRIFT: Error message format stability
+// Error message format stability
 #[test]
 fn test_golden_error_format() {
     let dir = TempDir::new().unwrap();

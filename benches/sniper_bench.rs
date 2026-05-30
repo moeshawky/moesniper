@@ -9,14 +9,14 @@ fn my_benchmark(c: &mut Criterion) {
                 .map(String::from)
                 .collect();
             std::hint::black_box(lines);
-        })
+        });
     });
 
     c.bench_function("split_inclusive_to_str", |b| {
         b.iter(|| {
             let lines: Vec<&str> = std::hint::black_box(&text).split_inclusive('\n').collect();
             std::hint::black_box(lines);
-        })
+        });
     });
 }
 

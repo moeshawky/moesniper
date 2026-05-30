@@ -1,7 +1,6 @@
-//! CBP boundary verification tests.
+//! Cross-component boundary verification tests.
 //!
-//! Covers: CBP-1 (PID lock), CBP-3 (temp file), CBP-4 (path order),
-//! C-attacks for critical boundaries, G-ERR fault injection.
+//! Covers lock acquisition, atomic write, path ordering, and fault injection.
 //!
 //! All assertions use exact comparisons — no substring/oracle looseness.
 
@@ -17,7 +16,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 // =========================================================================
-// CBP-1: PID-based lock file verification
+// PID-based lock file verification
 // =========================================================================
 
 #[test]
@@ -103,7 +102,7 @@ fn test_stale_lock_cleaned_on_timeout() {
 }
 
 // =========================================================================
-// CBP-3: Temp file uniqueness
+// Temp file uniqueness
 // =========================================================================
 
 #[test]
@@ -163,7 +162,7 @@ fn test_temp_file_name_contains_timestamp() {
 }
 
 // =========================================================================
-// CBP-4: Path validation order (validate before file ops)
+// Path validation order (validate before file ops)
 // =========================================================================
 
 #[test]
@@ -176,8 +175,8 @@ fn test_path_traversal_rejected_before_metadata_access() {
     );
     let err = result.unwrap_err();
     assert!(
-        err.contains("..") || err.contains("parent"),
-        "Error must mention parent reference, got: {}",
+        err.contains("parent") || err.contains("traversal") || err.contains(".."),
+        "Error must reference the traversal path, got: {}",
         err
     );
 }
@@ -203,7 +202,7 @@ fn test_nonexistent_file_rejected_before_size_check() {
 }
 
 // =========================================================================
-// G-SEC: Hex decode boundary cases
+// Hex decode boundary cases
 // =========================================================================
 
 #[test]
@@ -363,7 +362,7 @@ fn test_backup_hashes_are_deterministic() {
 }
 
 // =========================================================================
-// G-ERR: File permission errors
+// File permission errors
 // =========================================================================
 
 #[test]
@@ -377,8 +376,8 @@ fn test_check_file_size_permission_denied() {
     );
     let msg = result.unwrap_err();
     assert!(
-        msg.contains("metadata") || msg.contains("Failed to get metadata"),
-        "Error must mention metadata: {}",
+        msg.starts_with("Failed to get metadata"),
+        "Error must start with 'Failed to get metadata', got: {}",
         msg
     );
 }
@@ -394,7 +393,7 @@ fn test_write_atomic_readonly_dir() {
 }
 
 // =========================================================================
-// G-EDGE: Manifest boundary cases
+// Manifest boundary cases
 // =========================================================================
 
 #[test]
@@ -485,8 +484,8 @@ fn test_manifest_bad_hex_rejected_before_backup() {
         stderr
     );
     assert!(
-        stderr.contains("hex decode") || stderr.contains("hex"),
-        "Error must mention hex: {}",
+        stderr.contains("hex decode") || stderr.contains("invalid hex"),
+        "Error must mention hex issue, got: {}",
         stderr
     );
 
@@ -556,7 +555,7 @@ fn test_concurrent_backup_and_purge() {
 }
 
 // =========================================================================
-// G-EDGE: File size boundary values
+// File size boundary values
 // =========================================================================
 
 #[test]
@@ -601,7 +600,7 @@ fn test_file_size_unlimited_with_zero_config() {
 }
 
 // =========================================================================
-// G-SEM: write_atomic trailing newline invariants
+// write_atomic trailing newline invariants
 // =========================================================================
 
 #[test]
@@ -718,9 +717,24 @@ fn test_normalize_path_absolute() {
 
 #[test]
 fn test_normalize_path_empty_filename_rejected() {
-    // normalize_path on a directory should fail (no file_name)
     let result = normalize_path(".");
-    // Directory may succeed as path but should have "." as file_name
-    // This depends on implementation — verify it doesn't panic
-    let _ = result;
+    // "." may be normalized to the current working directory
+    // or rejected — either behavior is valid
+    match result {
+        Ok(path) => {
+            assert!(
+                path.is_dir() || path.to_string_lossy().ends_with("/workspace/sniper"),
+                "Normalized '.' must be cwd or directory, got: {:?}",
+                path
+            );
+        }
+        Err(e) => {
+            assert!(
+                e.contains("file_name") || e.contains("filename") || e.contains("path")
+                    || e.contains(".."),
+                "Error from '.' must reference path issue, got: {}",
+                e
+            );
+        }
+    }
 }
