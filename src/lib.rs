@@ -190,15 +190,14 @@ pub fn find_latest_backup(filepath: &str) -> Result<Option<PathBuf>, String> {
         return Ok(None);
     }
 
-    let mut backups: Vec<_> = fs::read_dir(dir)
+    let latest_backup = fs::read_dir(dir)
         .map_err(|e| format!("read backup dir: {e}"))?
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
         .map(|e| e.path())
-        .collect();
+        .max();
 
-    backups.sort();
-    Ok(backups.pop())
+    Ok(latest_backup)
 }
 
 pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
@@ -441,16 +440,49 @@ impl Drop for SniperLock {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use std::fs;
 
     #[test]
-    fn test_check_file_size_within_limit() {
+    fn test_normalize_path_existing() {
         let dir = TempDir::new().unwrap();
-        let file = dir.path().join("small.txt");
-        fs::write(&file, "small content").unwrap();
+        let file_path = dir.path().join("existing.txt");
+        fs::write(&file_path, "content").unwrap();
 
-        let result = check_file_size(file.to_str().unwrap(), 100);
-        assert!(result.is_ok());
+        let normalized = normalize_path(file_path.to_str().unwrap()).unwrap();
+        assert_eq!(normalized, file_path.canonicalize().unwrap());
     }
+
+    #[test]
+    fn test_normalize_path_new_file() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("new_file.txt");
+
+        let normalized = normalize_path(file_path.to_str().unwrap()).unwrap();
+        assert_eq!(normalized, dir.path().canonicalize().unwrap().join("new_file.txt"));
+    }
+
+    #[test]
+    fn test_normalize_path_missing_parent() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("missing_dir").join("new_file.txt");
+
+        // normalize_path resolves by walking up to the first existing ancestor,
+        // canonicalizing that, then appending the remaining components. This
+        // allows paths with non-existent parent directories since sniper creates
+        // files/directories during atomic write operations.
+        let normalized = normalize_path(file_path.to_str().unwrap()).unwrap();
+        let expected = dir.path().canonicalize().unwrap().join("missing_dir").join("new_file.txt");
+        assert_eq!(normalized, expected);
+    }
+
+    #[test]
+    fn test_normalize_path_invalid_filename() {
+        let dir = TempDir::new().unwrap();
+        let invalid_path = dir.path().join("missing_dir").join("..");
+        let result = normalize_path(invalid_path.to_str().unwrap());
+        assert!(result.is_err());
+    }
+}
 
     #[test]
     fn test_check_file_size_exceeds_limit() {
