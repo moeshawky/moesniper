@@ -1,4 +1,48 @@
+# ── Build artifacts ───────────────────────────────────────────────────────────
 target/
-Cargo.lock
+*.pdb
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
+# Cargo.lock is committed for binary crates per Rust convention
+# (ensures reproducible builds for published binaries).
+
+# ── Rustfmt backups ───────────────────────────────────────────────────────────
+**/*.rs.bk
+
+# ── IDE / Editor ──────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+*.sublime-project
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Project runtime ───────────────────────────────────────────────────────────
 .ix/
 .sniper/
+
+# ── Proptest regressions ──────────────────────────────────────────────────────
+# Keep these in repo for reproducibility.
+# proptest-regressions/
+
+# ── Secrets / environment ─────────────────────────────────────────────────────
+.env
+.env.*
+*.key
+*.pem
+credentials.json
+
+# ── Temporary / ephemeral ─────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.log
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg

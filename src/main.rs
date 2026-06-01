@@ -5,110 +5,84 @@
 //! Batch manifests apply bottom-up so line numbers never shift.
 //!
 //! Usage:
-//!   sniper <file> <start> <end> <hex>       Replace lines
-//!   sniper <file> <start> <end> --delete    Delete lines
-//!   sniper <file> --manifest <path>         Batch (bottom-up)
-//!   sniper <file> --undo                    Restore backup
+//! sniper <file> <start> <end> <hex>          Replace lines
+//! sniper <file> <start> <end> --delete        Delete lines
+//! sniper <file> <start> <end> --stdin         Read content from stdin
+//! sniper <file> --manifest <path>             Batch from JSON manifest
+//! sniper <file> --undo                        Restore from backup
+//! sniper encode [--stdin|--file <path>|<text>]     Hex-encode content
 //!
-//! Flags: --dry-run, --json
+//! Flags: --dry-run, --json, --stdin, --auto-indent, --force-indent, --context <hash>
+//!
+//! Indentation: Validation runs by default. --auto-indent fixes unindented content.
+//!              --force-indent bypasses validation for deliberate refactoring.
+//! --context:   Verifies SHA-256 hash (first 16 hex chars) of 3 lines before and
+//!              after the edit target. Rejects if context changed since line numbers
+//!              were computed.
+//!
+//! LINE NUMBERS: All line numbers are 1-based (first line is 1, not 0)
+//!
+//! CONFIGURATION (via environment variables):
+//! SNIPER_LOCK_TIMEOUT              Lock acquisition timeout in seconds (default: 30)
+//! SNIPER_MAX_FILE_SIZE             Maximum file size to edit, e.g., "100MB" (default: 100MB)
+//! SNIPER_BACKUP_RETENTION_COUNT    Number of backups to keep (default: 50)
+//! SNIPER_BACKUP_MAX_AGE_DAYS       Max age of backups in days (default: 30)
+
+mod help_text;
 
 use std::fs;
 use std::io::Read;
 
+mod diff;
+mod indent;
+
+use diff::generate_preview;
+use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
+
 use moesniper::{
-    create_backup, find_latest_backup, handle_backtrack_error, hex_decode, write_atomic,
-    write_atomic_owned, SniperLock,
+    check_file_size, count_recent_backups, create_backup, find_latest_backup,
+    handle_backtrack_error, hex_decode, normalize_path, purge_old_backups, verify_context,
+    write_atomic, SniperConfig, SniperLock,
 };
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
-        eprint!(concat!(
-            "CRITICAL: REASON BEFORE ANY ACTIONS.\n",
-            "MANDATE: Analyze file context and intent before committing edits.\n",
-            "METABOLIC AWARENESS: Atomic writes self-throttle if iowait > 15.0.\n",
-            "BACK-PRESSURE: Aborts the rename and preserves the backup on Error -7.\n",
-            "\n",
-            "sniper — escape-proof precision file editor for LLM agents\n",
-            "\n",
-            "USAGE:\n",
-            "  sniper <file> <start> <end> <hex>       Replace lines start-end with hex-decoded content\n",
-            "  sniper <file> <start> <end> --delete    Delete lines start-end\n",
-            "  sniper <file> --manifest <path>         Batch ops from JSON (applied bottom-up)\n",
-            "  sniper <file> --undo                    Restore from last backup (supports multi-step)\n",
-            "  sniper encode [--stdin | --file <p>]    Output hex-encoded string (use --stdin for safety)\n",
-            "\n",
-            "FLAGS:\n",
-            "  --dry-run   Preview changes without applying\n",
-            "  --json      Machine-readable JSON output\n",
-            "\n",
-            "ENCODING:\n",
-            "  Truly escape-proof: cat code.rs | sniper encode --stdin\n",
-            "  From file:          sniper encode --file snippet.txt\n",
-            "  Positional (UNSAFE): sniper encode 'text' (subject to shell escaping)\n",
-            "\n",
-            "MANIFEST FORMAT:\n",
-            "  [{{\"start\": 42, \"end\": 45, \"hex\": \"6e6577\"}}, {{\"start\": 10, \"delete\": true}}]\n",
-            "  Operations applied bottom-up (highest line first). Line numbers refer to original file.\n",
-            "\n",
-            "BACKUPS:\n",
-            "  Every edit creates .sniper/<path_hash>.<filename>.<timestamp>\n",
-            "  Undo restores the most recent backup and removes it from the stack.\n",
-            "\n",
-            "AGENTIC EDITING (UTCP Schema):\n",
-            "  Replace line:    sniper --json file.rs 42 42 6e6577 → {{\"status\":\"ok\",...}}\n",
-            "  Delete lines:    sniper --json file.rs 10 15 --delete → remove lines 10-15\n",
-            "  Batch edit:      sniper --json file.rs --manifest ops.json → multiple edits\n",
-            "  Dry-run check:   sniper --json --dry-run file.rs 1 3 787878 → preview only\n",
-            "  Undo:            sniper --json file.rs --undo → restore backup\n",
-            "\n",
-            "LLM AGENT USAGE:\n",
-            "  Encode content:  sniper encode 'fn main() {{}}'\n",
-            "  Get line range:  Use ix to find lines, then sniper to edit them\n",
-            "  Safe workflow:   Dry-run first, check JSON output, then apply\n",
-            "  Idempotent:      --dry-run never modifies files, safe to retry\n",
-            "\n",
-            "JSON OUTPUT SCHEMA:\n",
-            "  status:       \"ok\" | \"dry_run\" | \"restored\" | \"error\" | \"encoded\"\n",
-            "  file:         path to edited file (null on error)\n",
-            "  lines_removed: count of lines removed\n",
-            "  lines_inserted: count of lines inserted\n",
-            "  total_lines:  file line count after edit\n",
-            "  operations:   count of manifest ops (manifest mode only)\n",
-            "  backup:       path to backup file (null on error/dry-run)\n",
-            "  message:      error/encoded result description\n",
-            "\n",
-            "CONSTRAINTS:\n",
-            "  - All content MUST be hex-encoded to prevent shell corruption.\n",
-            "  - Line numbers are 1-indexed, inclusive on both ends.\n",
-            "  - Manifest ops applied bottom-up (highest line first).\n",
-            "  - Atomic writes: file is written to temp, then renamed.\n",
-            "\n",
-            "EXAMPLES:\n",
-            "  Replace line 5 with 'hello world':\n",
-            "    sniper file.rs 5 5 68656c6c6f20776f726c64\n",
-            "\n",
-            "  Delete lines 10-20:\n",
-            "    sniper file.rs 10 20 --delete\n",
-            "\n",
-            "  Batch edit with manifest:\n",
-            "    echo '[{{\"start\":1,\"end\":1,\"hex\":\"78\"}}]' > ops.json\n",
-            "    sniper file.rs --manifest ops.json\n",
-            "\n",
-            "  Undo last edit:\n",
-            "    sniper file.rs --undo\n",
-        ));
+        eprint!("{}", help_text::HELP);
         std::process::exit(0);
     }
 
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let json_out = args.iter().any(|a| a == "--json");
     let use_stdin = args.iter().any(|a| a == "--stdin");
+    let auto_indent = args.iter().any(|a| a == "--auto-indent");
+    let force_indent = args.iter().any(|a| a == "--force-indent");
+
+    let mut context_hash: Option<String> = None;
+    if let Some(pos) = args.iter().position(|a| a == "--context") {
+        if pos + 1 < args.len() {
+            context_hash = Some(args[pos + 1].clone());
+        }
+    }
+
     let args: Vec<&str> = args
         .iter()
-        .filter(|a| *a != "--dry-run" && *a != "--json" && *a != "--stdin")
-        .map(|s| s.as_str())
+        .enumerate()
+        .filter(|(i, a)| {
+            if context_hash.is_some() {
+                let ctx_pos = args.iter().position(|x| x == "--context").unwrap();
+                if *i == ctx_pos || *i == ctx_pos + 1 {
+                    return false;
+                }
+            }
+        !(*a == "--dry-run"
+            || *a == "--json"
+            || *a == "--stdin"
+            || *a == "--auto-indent"
+            || *a == "--force-indent")
+        })
+        .map(|(_, s)| s.as_str())
         .collect();
 
     let result = match args.as_slice() {
@@ -125,14 +99,27 @@ fn main() {
         },
         ["encode", text] => cmd_encode(text),
         [file, "--undo"] => cmd_undo(file),
-        [file, "--manifest"] if use_stdin => cmd_manifest_stdin(file, dry_run),
-        [file, "--manifest", manifest] => cmd_manifest(file, manifest, dry_run),
+        [file, "--manifest"] if use_stdin => {
+            cmd_manifest_stdin(file, dry_run, auto_indent, force_indent)
+        }
+        [file, "--manifest", manifest] => {
+            cmd_manifest(file, manifest, dry_run, auto_indent, force_indent)
+        }
         [file, start, end, "--delete"] => {
             if use_stdin {
                 err("cannot use --stdin with --delete".into())
             } else {
                 match (parse_line(start), parse_line(end)) {
-                    (Ok(s), Ok(e)) => cmd_splice(file, s, e, "", dry_run),
+                    (Ok(s), Ok(e)) => cmd_splice(
+                        file,
+                        s,
+                        e,
+                        "",
+                        dry_run,
+                        auto_indent,
+                        force_indent,
+                        context_hash.as_deref(),
+                    ),
                     (Err(e), _) | (_, Err(e)) => err(e),
                 }
             }
@@ -141,9 +128,16 @@ fn main() {
             let mut buffer = String::new();
             match std::io::stdin().read_to_string(&mut buffer) {
                 Ok(_) => match (parse_line(start), parse_line(end)) {
-                    (Ok(ln_start), Ok(ln_end)) => {
-                        cmd_splice(file, ln_start, ln_end, &buffer, dry_run)
-                    }
+                    (Ok(ln_start), Ok(ln_end)) => cmd_splice(
+                        file,
+                        ln_start,
+                        ln_end,
+                        &buffer,
+                        dry_run,
+                        auto_indent,
+                        force_indent,
+                        context_hash.as_deref(),
+                    ),
                     (Err(e), _) | (_, Err(e)) => err(e),
                 },
                 Err(e) => err(format!("read stdin: {e}")),
@@ -151,7 +145,16 @@ fn main() {
         }
         [file, start, end, hex] => match (parse_line(start), parse_line(end)) {
             (Ok(s), Ok(e)) => match hex_decode(hex) {
-                Ok(content) => cmd_splice(file, s, e, &content, dry_run),
+                Ok(content) => cmd_splice(
+                    file,
+                    s,
+                    e,
+                    &content,
+                    dry_run,
+                    auto_indent,
+                    force_indent,
+                    context_hash.as_deref(),
+                ),
                 Err(msg) => err(format!("hex decode: {msg}")),
             },
             (Err(e), _) | (_, Err(e)) => err(e),
@@ -178,10 +181,41 @@ fn main() {
             "restored" => println!("restored: {}", result.backup.as_deref().unwrap_or("?")),
             "encoded" => println!("{}", result.message.as_deref().unwrap_or("")),
             "dry_run" => {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&result).unwrap_or_default()
-                )
+                println!("=== DRY RUN PREVIEW ===");
+                println!("File: {}", result.file.as_deref().unwrap_or("?"));
+                println!("Lines to remove: {}", result.lines_removed);
+                println!("Lines to insert: {}", result.lines_inserted);
+
+                if let Some(ref warning) = result.indent_warning {
+                    println!("\n⚠️  INDENTATION WARNING:");
+                    for line in warning.lines() {
+                        println!("   {}", line);
+                    }
+                }
+
+                if result.indent_fixed == Some(true) {
+                    println!("\n✓ Auto-indent applied");
+                }
+
+                if let Some(ref preview) = result.diff_preview {
+                    println!("\n--- Diff Preview ---");
+                    for line in preview {
+                        println!("{}", line);
+                    }
+                }
+
+                if result.ai_hint.is_some() {
+                    println!("\nHint: {}", result.ai_hint.as_deref().unwrap_or(""));
+                }
+
+                // Also output JSON if explicitly requested, but pretty print is default for dry-run
+                if json_out {
+                    println!("\n--- JSON Output ---");
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&result).unwrap_or_default()
+                    );
+                }
             }
             _ => {
                 eprintln!("error: {}", result.message.as_deref().unwrap_or("unknown"));
@@ -208,6 +242,14 @@ struct CliResult {
     backup: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     ai_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diff_preview: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    indent_warning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    indent_fixed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line_shift: Option<i64>,
 }
 
 fn cmd_encode(text: &str) -> CliResult {
@@ -223,8 +265,30 @@ fn cmd_encode(text: &str) -> CliResult {
     }
 }
 
-fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: bool) -> CliResult {
-    let _lock = match SniperLock::acquire(filepath) {
+#[allow(clippy::too_many_arguments)]
+fn cmd_splice(
+    filepath: &str,
+    start: usize,
+    end: usize,
+    content: &str,
+    dry_run: bool,
+    auto_indent: bool,
+    force_indent: bool,
+    context_hash: Option<&str>,
+) -> CliResult {
+    // Load configuration
+    let config = SniperConfig::from_env();
+
+    // Validate path before any file operations
+    if let Err(e) = normalize_path(filepath) {
+        return err(e);
+    }
+
+    if let Err(e) = check_file_size(filepath, config.max_file_size) {
+        return err(e);
+    }
+
+    let _lock = match SniperLock::acquire_with_config(filepath, &config) {
         Ok(l) => l,
         Err(e) => return err(e),
     };
@@ -233,17 +297,16 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
         Ok(t) => t,
         Err(e) => return err(handle_backtrack_error(e, "Read")),
     };
-    let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
+    let lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
-    // If the file does not end in a newline, the last line will not have one.
-    // We must ensure that if we are adding lines, they end in a newline if the original file had one or if they are not the last line.
-    // However, split_inclusive handles this correctly for the most part.
-    // But text.split_inclusive('\n') on "a\nb" gives ["a\n", "b"]
-    // cmd_splice was previously using lines(), which on "a\nb" gives ["a", "b"]
+    if let Some(expected) = context_hash {
+        if let Err(e) = verify_context(&lines, start, end, expected) {
+            return err(e);
+        }
+    }
 
     if start < 1 || end > lines.len() || start > end + 1 {
-        // Special case: inserting at the end of a file that might not have a trailing newline
-        if start == lines.len() + 1 && start == end + 1 {
+        if start == lines.len() + 1 && (start == end + 1 || start == end) {
             // Allow inserting at end
         } else {
             return err(format!(
@@ -261,13 +324,50 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
         0
     };
 
-    let new_lines: Vec<String> = if content.is_empty() {
+    // Parse new content
+    let mut new_lines: Vec<String> = if content.is_empty() {
         vec![]
     } else {
         content.split_inclusive('\n').map(String::from).collect()
     };
 
     let is_delete = content.is_empty();
+
+    // Handle auto-indent
+    let mut indent_fixed = None;
+    let mut indent_warning = None;
+
+    if !is_delete {
+        if auto_indent && needs_indent_fix(&lines, start, end, content) {
+            let fixed = auto_indent_content(&lines, start, end, content);
+            new_lines = fixed.split_inclusive('\n').map(String::from).collect();
+            indent_fixed = Some(true);
+        }
+
+        if !force_indent {
+            let (valid, warning, _suggested) = validate_indentation(&lines, start, end, &new_lines);
+            if !valid {
+                indent_warning = warning.clone();
+                if !dry_run {
+                    let msg = warning.unwrap_or_else(|| "Unknown indentation error".to_string());
+                    return CliResult {
+                        status: "error".into(),
+                        file: Some(filepath.into()),
+                        message: Some(format!("Indentation validation failed: {}", msg)),
+                        indent_warning,
+                        ..Default::default()
+                    };
+                }
+            }
+        }
+    }
+
+    // Generate diff preview for dry-run
+    let diff_preview = if dry_run && !is_delete {
+        Some(generate_preview(&lines, &new_lines, start, end))
+    } else {
+        None
+    };
 
     if dry_run {
         let ai_hint = Some(if is_delete {
@@ -281,6 +381,10 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
             lines_removed: removed_lines_count,
             lines_inserted: new_lines.len(),
             ai_hint,
+            diff_preview,
+            indent_warning,
+            indent_fixed,
+            line_shift: Some(new_lines.len() as i64 - removed_lines_count as i64),
             ..Default::default()
         };
     }
@@ -291,20 +395,30 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
     };
 
     let new_lines_count = new_lines.len();
+    let mut modified_lines = lines.clone();
 
-    if s < lines.len() {
-        let actual_end = end.min(lines.len());
-        lines.splice(s..actual_end, new_lines);
+    if s < modified_lines.len() {
+        let actual_end = end.min(modified_lines.len());
+        modified_lines.splice(s..actual_end, new_lines);
     } else {
-        lines.extend(new_lines);
+        modified_lines.extend(new_lines);
     }
 
-    let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+    let lines_refs: Vec<&str> = modified_lines.iter().map(|s| s.as_str()).collect();
     if let Err(e) = write_atomic(filepath, &lines_refs) {
         return err(e);
     }
 
-    let ai_hint = Some(if is_delete {
+    // Purge old backups according to retention policy
+    let _ = purge_old_backups(filepath, &config);
+
+    let manifest_promotion = count_recent_backups(filepath, config.lock_timeout.as_secs())
+        .map(|count| count >= 3)
+        .unwrap_or(false);
+
+    let ai_hint = Some(if manifest_promotion {
+        "Multiple edits to this file. Consider batching with manifest.".into()
+    } else if is_delete {
         format!("verify: {} around line {}", filepath, start)
     } else {
         format!("verify: read {} lines {}-{}", filepath, start, end)
@@ -315,32 +429,63 @@ fn cmd_splice(filepath: &str, start: usize, end: usize, content: &str, dry_run: 
         file: Some(filepath.into()),
         lines_removed: removed_lines_count,
         lines_inserted: new_lines_count,
-        total_lines: Some(lines.len()),
+        total_lines: Some(modified_lines.len()),
         backup: Some(bk),
         ai_hint,
+        indent_warning,
+        indent_fixed,
+        line_shift: Some(new_lines_count as i64 - removed_lines_count as i64),
         ..Default::default()
     }
 }
 
-fn cmd_manifest_stdin(filepath: &str, dry_run: bool) -> CliResult {
+fn cmd_manifest_stdin(
+    filepath: &str,
+    dry_run: bool,
+    auto_indent: bool,
+    force_indent: bool,
+) -> CliResult {
     let mut buffer = String::new();
     let manifest = match std::io::stdin().read_to_string(&mut buffer) {
         Ok(_) => buffer,
         Err(e) => return err(format!("read manifest from stdin: {e}")),
     };
-    cmd_manifest_impl(filepath, &manifest, dry_run)
+    cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, force_indent)
 }
 
-fn cmd_manifest(filepath: &str, manifest_path: &str, dry_run: bool) -> CliResult {
+fn cmd_manifest(
+    filepath: &str,
+    manifest_path: &str,
+    dry_run: bool,
+    auto_indent: bool,
+    force_indent: bool,
+) -> CliResult {
     let manifest = match fs::read_to_string(manifest_path) {
         Ok(m) => m,
         Err(e) => return err(format!("read manifest: {e}")),
     };
-    cmd_manifest_impl(filepath, &manifest, dry_run)
+    cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, force_indent)
 }
 
-fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult {
-    let _lock = match SniperLock::acquire(filepath) {
+fn cmd_manifest_impl(
+    filepath: &str,
+    manifest: &str,
+    dry_run: bool,
+    auto_indent: bool,
+    force_indent: bool,
+) -> CliResult {
+    let config = SniperConfig::from_env();
+
+    // Validate path before any file operations
+    if let Err(e) = normalize_path(filepath) {
+        return err(e);
+    }
+
+    if let Err(e) = check_file_size(filepath, config.max_file_size) {
+        return err(e);
+    }
+
+    let _lock = match SniperLock::acquire_with_config(filepath, &config) {
         Ok(l) => l,
         Err(e) => return err(e),
     };
@@ -350,6 +495,14 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
         Err(e) => return err(format!("parse manifest: {e}")),
     };
 
+    for op in &ops {
+        if let Some(ref hex) = op.hex {
+            if let Err(e) = hex_decode(hex) {
+                return err(format!("hex decode in manifest: {e}"));
+            }
+        }
+    }
+
     let text = match fs::read_to_string(filepath) {
         Ok(t) => t,
         Err(e) => return err(handle_backtrack_error(e, "Read")),
@@ -357,7 +510,7 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
     let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
     // Sort bottom-up
-    ops.sort_by(|a, b| b.start.cmp(&a.start));
+    ops.sort_by_key(|b| std::cmp::Reverse(b.start));
 
     let bk = if !dry_run {
         match create_backup(filepath) {
@@ -377,11 +530,42 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
         if op.delete.unwrap_or(false) {
             total_removed += lines.splice(s..e, std::iter::empty()).count();
         } else if let Some(ref hex) = op.hex {
-            let content = match hex_decode(hex) {
-                Ok(c) => c,
-                Err(e) => return err(format!("hex decode in manifest: {e}")),
+            let content = hex_decode(hex).unwrap(); // Pre-validated above
+
+            // Apply auto-indent if needed
+            let final_content = if auto_indent && needs_indent_fix(&lines, op.start, e, &content) {
+                auto_indent_content(&lines, op.start, e, &content)
+            } else {
+                content
             };
-            let new: Vec<String> = content.split_inclusive('\n').map(String::from).collect();
+
+            // Validate indentation if requested
+            if !force_indent {
+                let new_lines_for_check: Vec<String> = final_content
+                    .split_inclusive('\n')
+                    .map(String::from)
+                    .collect();
+                let (valid, warning, _) =
+                    validate_indentation(&lines, op.start, e, &new_lines_for_check);
+                if !valid && !dry_run {
+                    return CliResult {
+                        status: "error".into(),
+                        file: Some(filepath.into()),
+                        message: Some(format!(
+                            "Indentation validation failed at line {}: {}",
+                            op.start,
+                            warning.as_deref().unwrap_or_default()
+                        )),
+                        indent_warning: warning,
+                        ..Default::default()
+                    };
+                }
+            }
+
+            let new: Vec<String> = final_content
+                .split_inclusive('\n')
+                .map(String::from)
+                .collect();
             total_removed += e - s;
             total_inserted += new.len();
             lines.splice(s..e, new);
@@ -389,9 +573,11 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
     }
 
     if !dry_run {
-        if let Err(e) = write_atomic_owned(filepath, &lines) {
+        let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        if let Err(e) = write_atomic(filepath, &lines_refs) {
             return err(e);
         }
+        let _ = purge_old_backups(filepath, &config);
     }
 
     let ai_hint = Some(format!(
@@ -409,12 +595,14 @@ fn cmd_manifest_impl(filepath: &str, manifest: &str, dry_run: bool) -> CliResult
         operations: Some(ops.len()),
         ai_hint,
         backup: bk,
+        line_shift: Some(total_inserted as i64 - total_removed as i64),
         ..Default::default()
     }
 }
 
 fn cmd_undo(filepath: &str) -> CliResult {
-    let _lock = match SniperLock::acquire(filepath) {
+    let config = SniperConfig::from_env();
+    let _lock = match SniperLock::acquire_with_config(filepath, &config) {
         Ok(l) => l,
         Err(e) => return err(e),
     };
@@ -478,6 +666,7 @@ struct ManifestOp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::Digest;
     use std::fs;
     use tempfile::TempDir;
 
@@ -526,7 +715,7 @@ mod tests {
     fn test_cmd_splice_replace_single_line() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "line1\nline2\nline3\n");
-        let r = cmd_splice(&path, 2, 2, "hex", false);
+        let r = cmd_splice(&path, 2, 2, "hex", false, false, false, None);
         assert_eq!(r.status, "ok");
         assert_eq!(r.lines_removed, 1);
         assert_eq!(r.lines_inserted, 1);
@@ -538,7 +727,7 @@ mod tests {
     fn test_cmd_splice_preserves_missing_trailing_newline() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "line1\nline2");
-        let r = cmd_splice(&path, 2, 2, "new", false);
+        let r = cmd_splice(&path, 2, 2, "new", false, false, false, None);
         assert_eq!(r.status, "ok");
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "line1\nnew");
@@ -549,7 +738,7 @@ mod tests {
     fn test_cmd_splice_preserves_existing_trailing_newline() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "line1\nline2\n");
-        let r = cmd_splice(&path, 2, 2, "new", false);
+        let r = cmd_splice(&path, 2, 2, "new", false, false, false, None);
         assert_eq!(r.status, "ok");
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "line1\nnew\n");
@@ -560,7 +749,7 @@ mod tests {
     fn test_cmd_splice_replace_range() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\nc\nd\ne\n");
-        let r = cmd_splice(&path, 2, 4, "X\nY", false);
+        let r = cmd_splice(&path, 2, 4, "X\nY", false, false, false, None);
         assert_eq!(r.status, "ok");
         assert_eq!(r.lines_removed, 3);
         assert_eq!(r.lines_inserted, 2);
@@ -572,17 +761,37 @@ mod tests {
     fn test_cmd_splice_insert_at_end() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\n");
-        let r = cmd_splice(&path, 2, 2, "c", false);
+        let r = cmd_splice(&path, 2, 2, "c", false, false, false, None);
         assert_eq!(r.status, "ok");
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "a\nc\n");
     }
 
     #[test]
+    fn test_cmd_splice_insert_at_end_start_gt_end() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "test.txt", "a\nb\n");
+        let r = cmd_splice(&path, 3, 2, "c", false, false, false, None);
+        assert_eq!(r.status, "ok");
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "a\nb\nc\n");
+    }
+
+    #[test]
+    fn test_cmd_splice_insert_at_end_start_eq_end() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "test.txt", "a\nb\n");
+        let r = cmd_splice(&path, 3, 3, "c", false, false, false, None);
+        assert_eq!(r.status, "ok");
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "a\nb\nc\n");
+    }
+
+    #[test]
     fn test_cmd_splice_out_of_bounds() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\n");
-        let r = cmd_splice(&path, 10, 20, "x", false);
+        let r = cmd_splice(&path, 10, 20, "x", false, false, false, None);
         assert_eq!(r.status, "error");
         assert!(r.message.as_deref().unwrap().contains("out of bounds"));
     }
@@ -591,7 +800,7 @@ mod tests {
     fn test_cmd_splice_start_zero() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\n");
-        let r = cmd_splice(&path, 0, 1, "x", false);
+        let r = cmd_splice(&path, 0, 1, "x", false, false, false, None);
         assert_eq!(r.status, "error");
     }
 
@@ -601,7 +810,7 @@ mod tests {
     fn test_cmd_splice_delete_single_line() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\nc\n");
-        let r = cmd_splice(&path, 2, 2, "", false);
+        let r = cmd_splice(&path, 2, 2, "", false, false, false, None);
         assert_eq!(r.status, "ok");
         assert_eq!(r.lines_removed, 1);
         assert_eq!(r.lines_inserted, 0);
@@ -613,7 +822,7 @@ mod tests {
     fn test_cmd_splice_delete_range() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\nc\nd\ne\n");
-        let r = cmd_splice(&path, 2, 4, "", false);
+        let r = cmd_splice(&path, 2, 4, "", false, false, false, None);
         assert_eq!(r.status, "ok");
         assert_eq!(r.lines_removed, 3);
         assert_eq!(r.lines_inserted, 0);
@@ -628,7 +837,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\nc\n");
         let original = fs::read_to_string(&path).unwrap();
-        let r = cmd_splice(&path, 2, 2, "7878", true);
+        let r = cmd_splice(&path, 2, 2, "7878", true, false, false, None);
         assert_eq!(r.status, "dry_run");
         let after = fs::read_to_string(&path).unwrap();
         assert_eq!(original, after);
@@ -639,7 +848,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\nc\n");
         let original = fs::read_to_string(&path).unwrap();
-        let r = cmd_splice(&path, 1, 2, "", true);
+        let r = cmd_splice(&path, 1, 2, "", true, false, false, None);
         assert_eq!(r.status, "dry_run");
         let after = fs::read_to_string(&path).unwrap();
         assert_eq!(original, after);
@@ -654,7 +863,7 @@ mod tests {
         let manifest =
             r#"[{"start": 1, "end": 1, "hex": "78"}, {"start": 3, "end": 4, "delete": true}]"#;
         let manifest_path = create_file(&dir, "ops.json", manifest);
-        let r = cmd_manifest(&path, &manifest_path, false);
+        let r = cmd_manifest(&path, &manifest_path, false, false, false);
         assert_eq!(r.status, "ok");
         assert_eq!(r.operations, Some(2));
         let content = fs::read_to_string(&path).unwrap();
@@ -668,7 +877,7 @@ mod tests {
         let original = fs::read_to_string(&path).unwrap();
         let manifest = r#"[{"start": 1, "end": 1, "hex": "78"}]"#;
         let manifest_path = create_file(&dir, "ops.json", manifest);
-        let r = cmd_manifest(&path, &manifest_path, true);
+        let r = cmd_manifest(&path, &manifest_path, true, false, false);
         assert_eq!(r.status, "dry_run");
         let after = fs::read_to_string(&path).unwrap();
         assert_eq!(original, after);
@@ -679,7 +888,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\n");
         let manifest_path = create_file(&dir, "ops.json", "not json");
-        let r = cmd_manifest(&path, &manifest_path, false);
+        let r = cmd_manifest(&path, &manifest_path, false, false, false);
         assert_eq!(r.status, "error");
         assert!(r.message.as_deref().unwrap().contains("parse manifest"));
     }
@@ -699,7 +908,7 @@ mod tests {
     fn test_cmd_undo_restores() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "undo_restores_unique_67890.txt", "original\n");
-        let _ = cmd_splice(&path, 1, 1, "xx", false);
+        let _ = cmd_splice(&path, 1, 1, "xx", false, false, false, None);
         let content = fs::read_to_string(&path).unwrap();
         assert_ne!(content, "original\n");
         let r = cmd_undo(&path);
@@ -713,8 +922,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "multi_undo.txt", "v1\n");
 
-        cmd_splice(&path, 1, 1, "v2", false); // edit 1
-        cmd_splice(&path, 1, 1, "v3", false); // edit 2
+        cmd_splice(&path, 1, 1, "v2", false, false, false, None); // edit 1
+        cmd_splice(&path, 1, 1, "v3", false, false, false, None); // edit 2
 
         assert_eq!(fs::read_to_string(&path).unwrap(), "v3\n");
 
@@ -757,18 +966,128 @@ mod tests {
         assert!(v.get("message").is_none());
     }
 
+    #[test]
+    fn test_line_shift_positive() {
+        let r = CliResult {
+            status: "ok".into(),
+            lines_removed: 2,
+            lines_inserted: 5,
+            line_shift: Some(3),
+            ..Default::default()
+        };
+        assert_eq!(r.line_shift, Some(3));
+    }
+
+    #[test]
+    fn test_line_shift_negative() {
+        let r = CliResult {
+            status: "ok".into(),
+            lines_removed: 5,
+            lines_inserted: 2,
+            line_shift: Some(-3),
+            ..Default::default()
+        };
+        assert_eq!(r.line_shift, Some(-3));
+    }
+
+    #[test]
+    fn test_line_shift_serialized_in_json() {
+        let r = CliResult {
+            status: "ok".into(),
+            lines_removed: 2,
+            lines_inserted: 3,
+            total_lines: Some(10),
+            line_shift: Some(1),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("line_shift"));
+        assert!(json.contains("1"));
+    }
+
+    #[test]
+    fn test_context_verification_match() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "ctx_test.txt", "a\nb\nc\nd\ne\nf\ng\nh\n");
+        let original = fs::read_to_string(&path).unwrap();
+        let _lines: Vec<String> = original.split_inclusive('\n').map(String::from).collect();
+
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(b"a\nb\n");
+        hasher.update(b"d\ne\nf\n");
+        let hash: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        let short_hash = &hash[..16];
+
+        let r = cmd_splice(&path, 3, 3, "NEW", false, false, false, Some(short_hash));
+        assert_eq!(r.status, "ok");
+    }
+
+    #[test]
+    fn test_context_verification_mismatch() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "ctx_test.txt", "a\nb\nc\nd\ne\nf\ng\nh\n");
+        let r = cmd_splice(
+            &path,
+            3,
+            3,
+            "NEW",
+            false,
+            false,
+            false,
+            Some("0000000000000000"),
+        );
+        assert_eq!(r.status, "error");
+        let msg = r.message.unwrap();
+        assert!(msg.contains("context mismatch"));
+    }
+
+    #[test]
+    fn test_manifest_promotion_after_multiple_edits() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(
+            &dir,
+            "promo_test.txt",
+            "line1\nline2\nline3\nline4\nline5\n",
+        );
+        cmd_splice(&path, 1, 1, "a", false, false, false, None);
+        cmd_splice(&path, 2, 2, "b", false, false, false, None);
+        cmd_splice(&path, 3, 3, "c", false, false, false, None);
+        let r = cmd_splice(&path, 4, 4, "d", false, false, false, None);
+        assert_eq!(r.status, "ok");
+        assert!(r.ai_hint.is_some());
+        let hint = r.ai_hint.unwrap();
+        assert!(
+            hint.contains("manifest"),
+            "Expected manifest promotion hint, got: {}",
+            hint
+        );
+    }
+
     // --- edge case tests ---
 
     #[test]
     fn test_file_not_found() {
-        let r = cmd_splice("/tmp/no_such_file_12345.txt", 1, 1, "78", false);
+        let r = cmd_splice(
+            "/tmp/no_such_file_12345.txt",
+            1,
+            1,
+            "78",
+            false,
+            false,
+            false,
+            None,
+        );
         assert_eq!(r.status, "error");
-        assert!(r
-            .message
-            .as_deref()
-            .unwrap()
-            .to_lowercase()
-            .contains("read"));
+        let msg = r.message.as_deref().unwrap().to_lowercase();
+        assert!(
+            msg.contains("read") || msg.contains("metadata") || msg.contains("no such file"),
+            "expected file-related error, got: {}",
+            msg
+        );
     }
 
     #[test]
@@ -778,21 +1097,21 @@ mod tests {
         let path = create_file(&dir, "no_trailing.txt", "a\nb");
 
         // Delete line 2 ("b")
-        let r = cmd_splice(&path, 2, 2, "", false);
+        let r = cmd_splice(&path, 2, 2, "", false, false, false, None);
         assert_eq!(r.status, "ok");
 
         let content = fs::read_to_string(&path).unwrap();
-        // Currently, it will be "a\n" because "a\n" was the first line from split_inclusive.
-        // If we want true precision, it should be "a".
+        // After PR #8: trailing newlines are stripped uniformly, then re-added based on original file.
+        // Original had no trailing newline, so result should be "a" (no trailing newline).
         // Let's see what it is currently.
-        assert_eq!(content, "a\n");
+        assert_eq!(content, "a");
     }
 
     #[test]
     fn test_single_line_file() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "one.txt", "only\n");
-        let r = cmd_splice(&path, 1, 1, "new", false);
+        let r = cmd_splice(&path, 1, 1, "new", false, false, false, None);
         assert_eq!(r.status, "ok");
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "new\n");
@@ -816,7 +1135,7 @@ mod tests {
             if lines.is_empty() || line_num > lines.len() {
                 return Ok(());
             }
-            let _ = cmd_splice(&path, line_num, line_num, &replacement, true);
+            let _ = cmd_splice(&path, line_num, line_num, &replacement, true, false, false, None);
             let after = fs::read_to_string(&path).unwrap();
             prop_assert_eq!(original, after);
         }
@@ -834,7 +1153,7 @@ mod tests {
             if start > end || end > lines_before.len() {
                 return Ok(());
             }
-            let _ = cmd_splice(&path, start, end, &replacement, false);
+            let _ = cmd_splice(&path, start, end, &replacement, false, false, false, None);
             let after = fs::read_to_string(&path).unwrap();
             let lines_after: Vec<&str> = after.lines().collect();
             // Lines before start should be preserved
@@ -869,7 +1188,7 @@ mod tests {
             if lines.is_empty() || line_num > lines.len() {
                 return Ok(());
             }
-            let _ = cmd_splice(&path, line_num, line_num, &replacement, false);
+            let _ = cmd_splice(&path, line_num, line_num, &replacement, false, false, false, None);
             let _ = cmd_undo(&path);
             let restored = fs::read_to_string(&path).unwrap();
             prop_assert_eq!(original, restored);
@@ -886,7 +1205,7 @@ mod tests {
             if lines_before.len() < 2 {
                 return Ok(());
             }
-            let r = cmd_splice(&path, 1, 2, &replacement, false);
+            let r = cmd_splice(&path, 1, 2, &replacement, false, false, false, None);
             let after = fs::read_to_string(&path).unwrap();
             let lines_after: Vec<&str> = after.lines().collect();
             // total_lines in result should match actual line count
@@ -900,7 +1219,7 @@ mod tests {
     fn test_ai_hint_after_splice() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "hint_test.txt", "a\nb\nc\n");
-        let r = cmd_splice(&path, 2, 2, "xx", false);
+        let r = cmd_splice(&path, 2, 2, "xx", false, false, false, None);
         assert_eq!(r.status, "ok");
         assert!(r.ai_hint.is_some());
         let hint = r.ai_hint.unwrap();
@@ -912,7 +1231,7 @@ mod tests {
     fn test_ai_hint_after_delete() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "hint_test.txt", "a\nb\nc\n");
-        let r = cmd_splice(&path, 2, 2, "", false);
+        let r = cmd_splice(&path, 2, 2, "", false, false, false, None);
         assert_eq!(r.status, "ok");
         assert!(r.ai_hint.is_some());
         let hint = r.ai_hint.unwrap();
@@ -924,14 +1243,14 @@ mod tests {
     fn test_ai_hint_after_dry_run() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "hint_test.txt", "a\nb\nc\n");
-        let r = cmd_splice(&path, 1, 1, "xx", true);
+        let r = cmd_splice(&path, 1, 1, "xx", true, false, false, None);
         assert_eq!(r.status, "dry_run");
         assert!(r.ai_hint.is_some());
     }
 
     #[test]
     fn test_ai_hint_after_error_not_found() {
-        let r = cmd_splice("/no/such/file.txt", 1, 1, "xx", false);
+        let r = cmd_splice("/no/such/file.txt", 1, 1, "xx", false, false, false, None);
         assert_eq!(r.status, "error");
         assert!(r.ai_hint.is_some());
         let hint = r.ai_hint.unwrap();
@@ -943,7 +1262,7 @@ mod tests {
     fn test_ai_hint_after_error_out_of_bounds() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "hint_test.txt", "a\nb\n");
-        let r = cmd_splice(&path, 10, 20, "xx", false);
+        let r = cmd_splice(&path, 10, 20, "xx", false, false, false, None);
         assert_eq!(r.status, "error");
         assert!(r.ai_hint.is_some());
         let hint = r.ai_hint.unwrap();
@@ -954,7 +1273,7 @@ mod tests {
     fn test_ai_hint_after_undo() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "undo_hint.txt", "original\n");
-        let _ = cmd_splice(&path, 1, 1, "xx", false);
+        let _ = cmd_splice(&path, 1, 1, "xx", false, false, false, None);
         let r = cmd_undo(&path);
         assert_eq!(r.status, "restored");
         assert!(r.ai_hint.is_some());

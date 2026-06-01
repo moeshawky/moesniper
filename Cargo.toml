@@ -1,12 +1,13 @@
 [package]
 name = "moesniper"
-version = "0.5.0-alpha"
+version = "0.7.0"
 edition = "2021"
 description = "Escape-proof precision file editor for LLM agents. Hex-encoded content, line-range splicing, atomic writes."
 license = "MIT"
 keywords = ["editor", "llm", "agent", "hex", "code"]
 categories = ["command-line-utilities", "development-tools"]
 repository = "https://github.com/moeshawky/moesniper"
+rust-version = "1.87"
 
 [[bin]]
 name = "sniper"
@@ -19,8 +20,38 @@ path = "src/lib.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-llmosafe = "0.5.0"
+llmosafe = "0.6.2"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
 proptest = "1"
+criterion = "0.8.2"
+
+[[bench]]
+name = "sniper_bench"
+harness = false
+
+# ── Lint Policy ──────────────────────────────────────────────────────────────
+# CI: cargo clippy --all-targets -- -D warnings (all warnings are errors).
+# These declarations add targeted enforcement beyond the default warning set.
+#
+# unwrap/expect enforcement is in src/lib.rs crate-level attributes
+# (denied for library code, allowed in #[cfg(test)]).
+[lints.clippy]
+# Deny: correctness + hygiene — these must never reach production
+unreachable = "deny"
+todo = "deny"
+panic = "deny"
+
+# Warn: quality + security — catch drift before it becomes debt
+dbg_macro = "warn"
+cast_possible_truncation = "warn"
+cast_sign_loss = "warn"
+semicolon_if_nothing_returned = "warn"
+unnested_or_patterns = "warn"
+redundant_else = "warn"
+
+# Allow: pedantic lints that produce false positives for this project
+type_complexity = "allow"
+print_stdout = "allow" # CLI binary — println! is the primary output mechanism
