@@ -5,6 +5,24 @@ All notable changes to moesniper will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Insert-at-end now accepts start=end=N+1 for natural append expressions
+- Bounds validation for `cmd_manifest_impl` to prevent splice panic on out-of-range manifests
+- Insert-at-end exception for manifest bounds (parity with cmd_splice)
+- 10+ regression tests: append-at-end (1/2/4-line), handle_backtrack_error, normalize_path
+
+### Fixed
+- Append-at-end (line N+1) rejected when start equals end (documented contract violation)
+- Original file permissions lost during atomic write — now copied to temp file before rename
+- `find_latest_backup` O(N log N) memory usage reduced to O(N) O(1) via iterator max
+- Stale thread handle test ("0.5.0") corrected for llmosafe 0.6.2
+- `test_normalize_path_missing_parent` assertion corrected for intentional non-existent path behavior
+
+### Changed
+- `write_atomic_impl` now uses `BufWriter` for buffered writes
+
 ## [0.7.0] - 2026-05-30
 
 ### Added
