@@ -5,14 +5,14 @@
 //! Batch manifests apply bottom-up so line numbers never shift.
 //!
 //! Usage:
-//! sniper <file> <start> <end> <hex>          Replace lines
-//! sniper <file> <start> <end> --delete        Delete lines
-//! sniper <file> <start> <end> --stdin         Read content from stdin
-//! sniper <file> --manifest <path>             Batch from JSON manifest
-//! sniper <file> --undo                        Restore from backup
-//! sniper encode [--stdin|--file <path>|<text>]     Hex-encode content
+//! sniper `<file>` `<start>` `<end>` `<hex>`          Replace lines
+//! sniper `<file>` `<start>` `<end>` --delete        Delete lines
+//! sniper `<file>` `<start>` `<end>` --stdin         Read content from stdin
+//! sniper `<file>` --manifest `<path>`             Batch from JSON manifest
+//! sniper `<file>` --undo                        Restore from backup
+//! sniper encode [--stdin|--file `<path>`|`<text>`]     Hex-encode content
 //!
-//! Flags: --dry-run, --json, --stdin, --auto-indent, --force-indent, --context <hash>
+//! Flags: --dry-run, --json, --stdin, --auto-indent, --force-indent, --context `<hash>`
 //!
 //! Indentation: Validation runs by default. --auto-indent fixes unindented content.
 //!              --force-indent bypasses validation for deliberate refactoring.
