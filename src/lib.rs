@@ -482,7 +482,6 @@ mod tests {
         let result = normalize_path(invalid_path.to_str().unwrap());
         assert!(result.is_err());
     }
-}
 
     #[test]
     fn test_check_file_size_exceeds_limit() {
