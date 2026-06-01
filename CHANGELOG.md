@@ -5,7 +5,7 @@ All notable changes to moesniper will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0.html).
 
-## [Unreleased]
+## [0.7.1] - 2026-06-01
 
 ### Added
 - Insert-at-end now accepts start=end=N+1 for natural append expressions
@@ -147,6 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 
 | Version | Date | Key Feature |
 |---------|------|-------------|
+| 0.7.1 | 2026-06-01 | Append-at-end fix, manifest bounds, permission preservation, perf optimization |
 | 0.7.0 | 2026-05-30 | Indent engine, PID locks, context verification, docs unification |
 | 0.5.1 | 2026-05-14 | Test suite expansion, help text refactor |
 | 0.5.0 | 2026-05-14 | Enterprise security, auto-indent, dry-run |
