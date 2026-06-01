@@ -246,6 +246,12 @@ fn write_atomic_impl<S: AsRef<str>>(
         .unwrap_or(0);
     let tmp = format!("{filepath}.sniper_tmp.{ts}");
     let f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
+
+    if let Ok(metadata) = fs::metadata(filepath) {
+        let perms = metadata.permissions();
+        let _ = fs::set_permissions(&tmp, perms);
+    }
+
     let mut f = std::io::BufWriter::new(f);
     let num_lines = lines.len();
     for (i, line) in lines.iter().enumerate() {
