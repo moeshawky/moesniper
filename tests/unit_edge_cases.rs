@@ -35,7 +35,7 @@ fn test_edge_case_empty_file() {
     // Inserting into empty file should succeed or return a meaningful error
     let content_after = fs::read_to_string(&file_path).unwrap_or_default();
     if output.status.success() {
-        assert_eq!(content_after, "\n", "Empty file + hex 41 should produce newline");
+        assert_eq!(content_after, "A", "Empty file + hex 41 should insert 'A'");
     }
 }
 

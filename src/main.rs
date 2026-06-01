@@ -306,7 +306,7 @@ fn cmd_splice(
     }
 
     if start < 1 || end > lines.len() || start > end + 1 {
-        if start == lines.len() + 1 && start == end + 1 {
+        if start == lines.len() + 1 && (start == end + 1 || start == end) {
             // Allow inserting at end
         } else {
             return err(format!(
@@ -765,6 +765,26 @@ mod tests {
         assert_eq!(r.status, "ok");
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, "a\nc\n");
+    }
+
+    #[test]
+    fn test_cmd_splice_insert_at_end_start_gt_end() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "test.txt", "a\nb\n");
+        let r = cmd_splice(&path, 3, 2, "c", false, false, false, None);
+        assert_eq!(r.status, "ok");
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "a\nb\nc\n");
+    }
+
+    #[test]
+    fn test_cmd_splice_insert_at_end_start_eq_end() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "test.txt", "a\nb\n");
+        let r = cmd_splice(&path, 3, 3, "c", false, false, false, None);
+        assert_eq!(r.status, "ok");
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "a\nb\nc\n");
     }
 
     #[test]
