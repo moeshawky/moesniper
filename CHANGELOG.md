@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 
 ### Changed
 - `write_atomic_impl` now uses `BufWriter` for buffered writes
+- **llmosafe 0.6.2 → 0.7.1**: `ResourceGuard::for_testing()` available for deterministic test entropy/pressure. `PidInput` struct added (not used by sniper). `sift_observation_inner`, `GainSchedule`, `Setpoint` removed (zero impact). `DeadlineExceeded` (-7) remains a valid `KernelError` variant used in `check_blocking()` and C-ABI, but resource exhaustion now surfaces via `KernelError::ResourceExhaustion` from `ResourceGuard::check()` rather than OS-level IO error codes.
 
 ## [0.7.0] - 2026-05-30
 

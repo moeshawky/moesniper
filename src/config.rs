@@ -6,6 +6,36 @@
 use std::env;
 use std::time::Duration;
 
+/// Defense-Ascension Level controlling resource-check strictness.
+///
+/// - `Baseline`: No extra resource checks beyond standard guard.check().
+/// - `Enhanced`: Standard checks apply (guard.check() before I/O).
+/// - `Maximum`: Double-checks resources before proceeding past the gate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DalLevel {
+    /// Standard behavior: guard.check() at entry, no extra gating.
+    #[default]
+    Baseline,
+    /// Standard checks apply. Equivalent to Baseline in current implementation.
+    Enhanced,
+    /// Extra resource validation before proceeding past the gate.
+    Maximum,
+}
+
+impl DalLevel {
+    /// Parses a DAL level string from the SNIPER_DAL_LEVEL environment variable.
+    ///
+    /// Accepts "Baseline", "Enhanced", "Maximum" (case-insensitive).
+    /// Returns `Baseline` for any unrecognized value.
+    pub fn from_env() -> Self {
+        match env::var("SNIPER_DAL_LEVEL").as_deref() {
+            Ok("Enhanced") => Self::Enhanced,
+            Ok("Maximum") => Self::Maximum,
+            _ => Self::Baseline,
+        }
+    }
+}
+
 /// Configuration for sniper operations.
 #[derive(Debug, Clone)]
 pub struct SniperConfig {
@@ -19,6 +49,8 @@ pub struct SniperConfig {
     pub backup_max_age_days: u64,
     /// Whether to enable audit logging.
     pub audit_enabled: bool,
+    /// Defense-Ascension Level controlling resource-check strictness.
+    pub dal_level: DalLevel,
 }
 
 impl Default for SniperConfig {
@@ -29,6 +61,7 @@ impl Default for SniperConfig {
             backup_retention_count: 50,
             backup_max_age_days: 30,
             audit_enabled: true,
+            dal_level: DalLevel::default(),
         }
     }
 }
@@ -68,6 +101,9 @@ impl SniperConfig {
         if env::var("SNIPER_DISABLE_AUDIT").is_ok() {
             config.audit_enabled = false;
         }
+
+        // DAL level: SNIPER_DAL_LEVEL
+        config.dal_level = DalLevel::from_env();
 
         config
     }

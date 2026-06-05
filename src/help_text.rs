@@ -1,3 +1,4 @@
+/// CLI help text for the sniper command.
 pub const HELP: &str = r#"sniper — escape-proof precision file editor for LLM agents
 
 USAGE:
@@ -96,7 +97,7 @@ NOTES:
     - Insert at end: Use line N+1 where N is file length
     - All edits are atomic (temp file + rename)
     - PID-based file locks with stale lock auto-recovery
-    - Metabolic pacing via llmosafe 0.6.2 ResourceGuard
+    - Metabolic pacing via llmosafe 0.7.1 ResourceGuard
 
 For more: https://github.com/moeshawky/moesniper
 "#;

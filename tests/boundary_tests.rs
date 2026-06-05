@@ -730,7 +730,9 @@ fn test_normalize_path_empty_filename_rejected() {
         }
         Err(e) => {
             assert!(
-                e.contains("file_name") || e.contains("filename") || e.contains("path")
+                e.contains("file_name")
+                    || e.contains("filename")
+                    || e.contains("path")
                     || e.contains(".."),
                 "Error from '.' must reference path issue, got: {}",
                 e

@@ -1,4 +1,4 @@
-//! Enterprise-grade path security validation and sanitization.
+//! Path security validation and sanitization.
 //!
 //! This module provides defense-in-depth path validation to prevent:
 //! - Path traversal attacks (../../../etc/passwd)
@@ -30,8 +30,11 @@ impl Default for SecurityPolicy {
 /// Path validation error types.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PathSecurityError {
+    /// Path contains a parent directory reference (..).
     ParentReferenceNotAllowed { component: String },
+    /// Path resolves outside the allowed base directory.
     EscapesBaseDirectory { path: PathBuf, base: PathBuf },
+    /// Filesystem I/O error occurred during validation.
     IoError(String),
 }
 

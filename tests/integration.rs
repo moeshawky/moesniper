@@ -22,7 +22,12 @@ fn test_atomic_write_preserves_permissions() {
     fs::set_permissions(&file_path, perms).unwrap();
 
     let status = sniper()
-        .args([file_path.to_str().unwrap(), "1", "1", "6563686f2027776f726c6427"])
+        .args([
+            file_path.to_str().unwrap(),
+            "1",
+            "1",
+            "6563686f2027776f726c6427",
+        ])
         .status()
         .unwrap();
 

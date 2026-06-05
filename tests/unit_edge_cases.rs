@@ -68,7 +68,10 @@ fn test_edge_case_single_char() {
         String::from_utf8_lossy(&output.stdout)
     );
     let content_after = fs::read_to_string(&file_path).unwrap();
-    assert_eq!(content_after, "B", "Single char 'x' replaced with hex 42 ('B')");
+    assert_eq!(
+        content_after, "B",
+        "Single char 'x' replaced with hex 42 ('B')"
+    );
 }
 
 // Very long line (100K chars)

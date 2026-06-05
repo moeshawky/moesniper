@@ -16,8 +16,11 @@ use std::collections::HashMap;
 /// Represents the indentation style detected from context.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndentStyle {
+    /// Number of spaces per indent level (0 if using tabs).
     pub spaces: usize,
+    /// Whether this file uses tab indentation.
     pub uses_tabs: bool,
+    /// Visual width of one indent level.
     pub width: usize,
 }
 
@@ -32,6 +35,7 @@ impl Default for IndentStyle {
 }
 
 impl IndentStyle {
+    /// Returns the indentation string for a given nesting level.
     pub fn indent_string(&self, level: usize) -> String {
         if self.uses_tabs {
             "\t".repeat(level)
@@ -315,6 +319,7 @@ fn strip_trailing_comment(s: &str) -> &str {
 // validate_indentation
 // ————————————————————————————————————————————————————————————————————————————————
 
+/// Validates that replacement lines match the detected indentation style.
 pub fn validate_indentation(
     all_lines: &[String],
     start_line: usize,
@@ -385,6 +390,7 @@ pub fn validate_indentation(
 // auto_indent_content
 // ————————————————————————————————————————————————————————————————————————————————
 
+/// Prepends the detected indentation to each non-empty line of content.
 pub fn auto_indent_content(
     all_lines: &[String],
     start_line: usize,
@@ -416,6 +422,7 @@ pub fn auto_indent_content(
 // needs_indent_fix
 // ————————————————————————————————————————————————————————————————————————————————
 
+/// Returns true if any non-empty line has less indentation than expected.
 pub fn needs_indent_fix(
     all_lines: &[String],
     start_line: usize,

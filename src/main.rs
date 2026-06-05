@@ -42,8 +42,10 @@ use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
 use moesniper::{
     check_file_size, count_recent_backups, create_backup, find_latest_backup,
     handle_backtrack_error, hex_decode, normalize_path, purge_old_backups, verify_context,
-    write_atomic, SniperConfig, SniperLock,
+    write_atomic_with_dal, RiskTelemetry, SniperConfig, SniperLock,
 };
+
+use llmosafe::ResourceGuard;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -76,11 +78,11 @@ fn main() {
                     return false;
                 }
             }
-        !(*a == "--dry-run"
-            || *a == "--json"
-            || *a == "--stdin"
-            || *a == "--auto-indent"
-            || *a == "--force-indent")
+            !(*a == "--dry-run"
+                || *a == "--json"
+                || *a == "--stdin"
+                || *a == "--auto-indent"
+                || *a == "--force-indent")
         })
         .map(|(_, s)| s.as_str())
         .collect();
@@ -250,6 +252,13 @@ struct CliResult {
     indent_fixed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     line_shift: Option<i64>,
+    /// Risk telemetry computed from live ResourceGuard when available.
+    /// Always populated when a guard is present; serialized only when Some.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    risk: Option<RiskTelemetry>,
+    /// Human-readable recommended action based on risk assessment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recommended_action: Option<String>,
 }
 
 fn cmd_encode(text: &str) -> CliResult {
@@ -405,7 +414,12 @@ fn cmd_splice(
     }
 
     let lines_refs: Vec<&str> = modified_lines.iter().map(|s| s.as_str()).collect();
-    if let Err(e) = write_atomic(filepath, &lines_refs) {
+
+    // T5: Create guard and use write_atomic_with_dal when available
+    let guard = ResourceGuard::auto(0.5);
+    let risk = RiskTelemetry::from_guard(&guard);
+    let config_for_dal = SniperConfig::from_env();
+    if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, config_for_dal.dal_level) {
         return err(e);
     }
 
@@ -424,6 +438,9 @@ fn cmd_splice(
         format!("verify: read {} lines {}-{}", filepath, start, end)
     });
 
+    // T10: Always include risk when guard is available
+    let recommended_action = Some(recommend_from_risk(&risk));
+
     CliResult {
         status: "ok".into(),
         file: Some(filepath.into()),
@@ -435,6 +452,8 @@ fn cmd_splice(
         indent_warning,
         indent_fixed,
         line_shift: Some(new_lines_count as i64 - removed_lines_count as i64),
+        risk: Some(risk),
+        recommended_action,
         ..Default::default()
     }
 }
@@ -584,10 +603,38 @@ fn cmd_manifest_impl(
 
     if !dry_run {
         let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-        if let Err(e) = write_atomic(filepath, &lines_refs) {
+        // T6: Use write_atomic_with_dal with guard
+        let guard = ResourceGuard::auto(0.5);
+        let risk = RiskTelemetry::from_guard(&guard);
+        let config_for_dal = SniperConfig::from_env();
+        if let Err(e) =
+            write_atomic_with_dal(filepath, &lines_refs, &guard, config_for_dal.dal_level)
+        {
             return err(e);
         }
         let _ = purge_old_backups(filepath, &config);
+
+        let ai_hint = Some(format!(
+            "verify: read {} around line {}",
+            filepath,
+            ops.first().map(|o| o.start).unwrap_or(1)
+        ));
+        let recommended_action = Some(recommend_from_risk(&risk));
+
+        return CliResult {
+            status: "ok".into(),
+            file: Some(filepath.into()),
+            lines_removed: total_removed,
+            lines_inserted: total_inserted,
+            total_lines: Some(lines.len()),
+            operations: Some(ops.len()),
+            ai_hint,
+            backup: bk,
+            line_shift: Some(total_inserted as i64 - total_removed as i64),
+            risk: Some(risk),
+            recommended_action,
+            ..Default::default()
+        };
     }
 
     let ai_hint = Some(format!(
@@ -644,6 +691,22 @@ fn cmd_undo(filepath: &str) -> CliResult {
 
 fn parse_line(s: &str) -> Result<usize, String> {
     s.parse().map_err(|_| format!("invalid line number: {s}"))
+}
+
+/// Produces a human-readable recommended action from risk telemetry.
+///
+/// Maps classifier_score ranges to specific guidance:
+/// - score >= 0.7: "Resource pressure high. Consider pausing."
+/// - score >= 0.4: "Moderate load. Proceed with caution."
+/// - score < 0.4: "Resources nominal."
+fn recommend_from_risk(risk: &RiskTelemetry) -> String {
+    if risk.classifier_score >= 0.7 {
+        "Resource pressure high. Consider pausing.".into()
+    } else if risk.classifier_score >= 0.4 {
+        "Moderate load. Proceed with caution.".into()
+    } else {
+        "Resources nominal.".into()
+    }
 }
 
 fn err(msg: String) -> CliResult {

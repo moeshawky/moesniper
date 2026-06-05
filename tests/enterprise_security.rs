@@ -203,8 +203,8 @@ mod backup_retention_tests {
             thread::sleep(Duration::from_millis(20));
         }
 
-        let normalized = normalize_path(file_path.to_str().unwrap())
-            .expect("Path normalization must succeed");
+        let normalized =
+            normalize_path(file_path.to_str().unwrap()).expect("Path normalization must succeed");
         let hash = get_path_hash(&normalized);
         let backup_dir = PathBuf::from(".sniper");
         assert!(backup_dir.exists(), "Backup directory must exist");
@@ -361,19 +361,18 @@ mod compound_security_tests {
         let lines: Vec<String> = original.split_inclusive('\n').map(String::from).collect();
         let mut new_lines = lines.clone();
         let replace_text = hex_decode("58").expect("valid hex: 'X'");
-        new_lines[2] = format!("{}{}", replace_text, if original.ends_with('\n') { "\n" } else { "" });
+        new_lines[2] = format!(
+            "{}{}",
+            replace_text,
+            if original.ends_with('\n') { "\n" } else { "" }
+        );
 
         // Create backup first
-        let backup = create_backup(file_path.to_str().unwrap())
-            .expect("Backup must succeed");
+        let backup = create_backup(file_path.to_str().unwrap()).expect("Backup must succeed");
 
         // Write new content atomically
         let write_lines: Vec<&str> = new_lines.iter().map(|s| s.as_str()).collect();
-        write_atomic(
-            file_path.to_str().unwrap(),
-            &write_lines,
-        )
-        .expect("Atomic write must succeed");
+        write_atomic(file_path.to_str().unwrap(), &write_lines).expect("Atomic write must succeed");
 
         // Verify file has correct content — not partial
         let content = fs::read_to_string(&file_path).unwrap();
@@ -400,8 +399,13 @@ mod compound_security_tests {
         // First edit: acquires lock, succeeds
         let output = Command::new("cargo")
             .args([
-                "run", "--quiet", "--",
-                file_path.to_str().unwrap(), "1", "1", "41",
+                "run",
+                "--quiet",
+                "--",
+                file_path.to_str().unwrap(),
+                "1",
+                "1",
+                "41",
             ])
             .output()
             .expect("First edit must spawn");
@@ -415,8 +419,13 @@ mod compound_security_tests {
         // Cleanup — the lock should be released already (process exited)
         let output = Command::new("cargo")
             .args([
-                "run", "--quiet", "--",
-                file_path.to_str().unwrap(), "1", "1", "42",
+                "run",
+                "--quiet",
+                "--",
+                file_path.to_str().unwrap(),
+                "1",
+                "1",
+                "42",
             ])
             .output()
             .expect("Second edit must spawn");
@@ -450,7 +459,15 @@ mod compound_security_tests {
             handles.push(thread::spawn(move || {
                 b.wait();
                 std::process::Command::new("cargo")
-                    .args(["run", "--quiet", "--", f.to_str().unwrap(), "2", "2", &hex_char])
+                    .args([
+                        "run",
+                        "--quiet",
+                        "--",
+                        f.to_str().unwrap(),
+                        "2",
+                        "2",
+                        &hex_char,
+                    ])
                     .output()
                     .unwrap()
                     .status

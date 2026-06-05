@@ -83,19 +83,35 @@ mod tests {
         let preview = generate_preview(&old, &new, 2, 2);
 
         // Must start with --- and +++ headers
-        assert!(preview[0].starts_with("--- original"), "Header missing: {}", preview[0]);
-        assert!(preview[1].starts_with("+++ modified"), "Header missing: {}", preview[1]);
+        assert!(
+            preview[0].starts_with("--- original"),
+            "Header missing: {}",
+            preview[0]
+        );
+        assert!(
+            preview[1].starts_with("+++ modified"),
+            "Header missing: {}",
+            preview[1]
+        );
         // Must contain a removal line for line2
         assert!(
-            preview.iter().any(|l| l.starts_with("-2|") && l.contains("line2")),
+            preview
+                .iter()
+                .any(|l| l.starts_with("-2|") && l.contains("line2")),
             "Must show removal of line 2"
         );
         // Must contain an addition line for new2
         assert!(
-            preview.iter().any(|l| l.starts_with("+2|") && l.contains("new2")),
+            preview
+                .iter()
+                .any(|l| l.starts_with("+2|") && l.contains("new2")),
             "Must show addition of new2"
         );
         // Line count must be reasonable (> 5 lines for context + diff)
-        assert!(preview.len() >= 5, "Preview too short: {}", preview.join("\n"));
+        assert!(
+            preview.len() >= 5,
+            "Preview too short: {}",
+            preview.join("\n")
+        );
     }
 }

@@ -137,7 +137,10 @@ fn test_golden_splice_append_at_end_two_line_file() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "start=3,end=3 on a 2-line file must append");
+    assert!(
+        output.status.success(),
+        "start=3,end=3 on a 2-line file must append"
+    );
 
     let content = fs::read_to_string(&file_path).unwrap();
     assert_eq!(
@@ -160,7 +163,10 @@ fn test_golden_splice_append_at_end_one_line_file() {
         .status()
         .unwrap();
 
-    assert!(status.success(), "start=2,end=2 on a 1-line file must append");
+    assert!(
+        status.success(),
+        "start=2,end=2 on a 1-line file must append"
+    );
 
     let content = fs::read_to_string(&file_path).unwrap();
     assert_eq!(
@@ -183,7 +189,10 @@ fn test_golden_splice_append_at_end_four_line_file() {
         .status()
         .unwrap();
 
-    assert!(status.success(), "start=5,end=5 on a 4-line file must append");
+    assert!(
+        status.success(),
+        "start=5,end=5 on a 4-line file must append"
+    );
 
     let content = fs::read_to_string(&file_path).unwrap();
     assert_eq!(
@@ -206,7 +215,10 @@ fn test_golden_splice_insert_at_end_start_gt_end() {
         .status()
         .unwrap();
 
-    assert!(status.success(), "start=3,end=2 on a 2-line file must append");
+    assert!(
+        status.success(),
+        "start=3,end=2 on a 2-line file must append"
+    );
 
     let content = fs::read_to_string(&file_path).unwrap();
     assert_eq!(
@@ -229,7 +241,10 @@ fn test_golden_splice_append_at_end_empty_content() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "start=3,end=3 with empty content on 2-line file must succeed");
+    assert!(
+        output.status.success(),
+        "start=3,end=3 with empty content on 2-line file must succeed"
+    );
 
     let content = fs::read_to_string(&file_path).unwrap();
     // Delete at end position with nothing to delete → file unchanged

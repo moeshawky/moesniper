@@ -51,12 +51,7 @@ fn test_path_traversal_rejected() {
 
     let traversal_path = dir.path().join("..").join("test.txt");
     let output = sniper()
-        .args([
-            &traversal_path.to_string_lossy(),
-            "1",
-            "1",
-            "41",
-        ])
+        .args([&traversal_path.to_string_lossy(), "1", "1", "41"])
         .output()
         .unwrap();
 
