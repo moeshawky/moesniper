@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "sniper-py"
+version = "0.7.1"
+description = "Escape-proof precision file editing — Python bindings for moesniper"
+license = "MIT"
+requires-python = ">=3.10"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "sniper._native"

@@ -90,6 +90,10 @@ CONFIGURATION:
     SNIPER_BACKUP_RETENTION_COUNT   Backups to keep (default: 50, 0=unlimited)
     SNIPER_BACKUP_MAX_AGE_DAYS     Max backup age in days (default: 30, 0=no limit)
     SNIPER_DISABLE_AUDIT            Set to any value to disable audit logging
+    SNIPER_DAL_LEVEL              Defense-Ascension Level: Baseline, Enhanced, Maximum (default: Baseline)
+    SNIPER_PID_BASE_MS            PID base sleep in milliseconds (default: 0)
+    SNIPER_PID_ENTROPY_SCALE      PID entropy multiplier (default: 0.5)
+    SNIPER_PID_PRESSURE_SCALE     PID pressure multiplier (default: 1.0)
 
 NOTES:
     - Line numbers: 1-indexed, inclusive on both ends

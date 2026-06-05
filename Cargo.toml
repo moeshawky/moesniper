@@ -1,3 +1,7 @@
+[workspace]
+members = ["sniper-py"]
+resolver = "2"
+
 [package]
 name = "moesniper"
 version = "0.7.1"

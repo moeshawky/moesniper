@@ -468,7 +468,12 @@ fn write_atomic_impl<S: AsRef<str>>(
     guard.check().map_err(|e| format!("resource safety: {e}"))?;
     let entropy = guard.raw_entropy();
     let pressure = guard.pressure();
-    let pid = PidConfig::default();
+    let config = SniperConfig::from_env();
+    let pid = PidConfig {
+        base_ms: config.pid_base_ms,
+        entropy_scale: config.pid_entropy_scale,
+        pressure_scale: config.pid_pressure_scale,
+    };
     let sleep = pid.sleep_duration(u64::from(entropy), pressure);
     if !sleep.is_zero() {
         thread::sleep(sleep);

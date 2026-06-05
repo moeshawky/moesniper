@@ -378,7 +378,13 @@ fn cmd_splice(
         None
     };
 
+    // Compute risk telemetry for both dry-run and real paths
+    let guard = ResourceGuard::auto(0.5);
+    let risk = RiskTelemetry::from_guard(&guard);
+    let config_for_dal = SniperConfig::from_env();
+
     if dry_run {
+        let recommended_action = Some(recommend_from_risk(&risk));
         let ai_hint = Some(if is_delete {
             format!("verify: {} around line {}", filepath, start)
         } else {
@@ -394,6 +400,8 @@ fn cmd_splice(
             indent_warning,
             indent_fixed,
             line_shift: Some(new_lines.len() as i64 - removed_lines_count as i64),
+            risk: Some(risk),
+            recommended_action,
             ..Default::default()
         };
     }
@@ -415,10 +423,7 @@ fn cmd_splice(
 
     let lines_refs: Vec<&str> = modified_lines.iter().map(|s| s.as_str()).collect();
 
-    // T5: Create guard and use write_atomic_with_dal when available
-    let guard = ResourceGuard::auto(0.5);
-    let risk = RiskTelemetry::from_guard(&guard);
-    let config_for_dal = SniperConfig::from_env();
+    // Use pre-computed guard, risk, and config_for_dal from above
     if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, config_for_dal.dal_level) {
         return err(e);
     }
@@ -601,12 +606,14 @@ fn cmd_manifest_impl(
         }
     }
 
+    let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+    // Compute risk telemetry for both dry-run and real paths
+    let guard = ResourceGuard::auto(0.5);
+    let risk = RiskTelemetry::from_guard(&guard);
+    let config_for_dal = SniperConfig::from_env();
+
     if !dry_run {
-        let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         // T6: Use write_atomic_with_dal with guard
-        let guard = ResourceGuard::auto(0.5);
-        let risk = RiskTelemetry::from_guard(&guard);
-        let config_for_dal = SniperConfig::from_env();
         if let Err(e) =
             write_atomic_with_dal(filepath, &lines_refs, &guard, config_for_dal.dal_level)
         {
@@ -642,6 +649,7 @@ fn cmd_manifest_impl(
         filepath,
         ops.first().map(|o| o.start).unwrap_or(1)
     ));
+    let recommended_action = Some(recommend_from_risk(&risk));
 
     CliResult {
         status: if dry_run { "dry_run" } else { "ok" }.into(),
@@ -653,6 +661,8 @@ fn cmd_manifest_impl(
         ai_hint,
         backup: bk,
         line_shift: Some(total_inserted as i64 - total_removed as i64),
+        risk: Some(risk),
+        recommended_action,
         ..Default::default()
     }
 }

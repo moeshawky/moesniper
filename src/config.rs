@@ -51,6 +51,12 @@ pub struct SniperConfig {
     pub audit_enabled: bool,
     /// Defense-Ascension Level controlling resource-check strictness.
     pub dal_level: DalLevel,
+    /// Base sleep for PID pacing in milliseconds.
+    pub pid_base_ms: u64,
+    /// Entropy scale factor for PID pacing.
+    pub pid_entropy_scale: f64,
+    /// Pressure scale factor for PID pacing.
+    pub pid_pressure_scale: f64,
 }
 
 impl Default for SniperConfig {
@@ -62,6 +68,9 @@ impl Default for SniperConfig {
             backup_max_age_days: 30,
             audit_enabled: true,
             dal_level: DalLevel::default(),
+            pid_base_ms: 0,
+            pid_entropy_scale: 0.5,
+            pid_pressure_scale: 1.0,
         }
     }
 }
@@ -104,6 +113,27 @@ impl SniperConfig {
 
         // DAL level: SNIPER_DAL_LEVEL
         config.dal_level = DalLevel::from_env();
+
+        // PID base ms: SNIPER_PID_BASE_MS
+        if let Ok(val) = env::var("SNIPER_PID_BASE_MS") {
+            if let Ok(ms) = val.parse::<u64>() {
+                config.pid_base_ms = ms;
+            }
+        }
+
+        // PID entropy scale: SNIPER_PID_ENTROPY_SCALE
+        if let Ok(val) = env::var("SNIPER_PID_ENTROPY_SCALE") {
+            if let Ok(scale) = val.parse::<f64>() {
+                config.pid_entropy_scale = scale;
+            }
+        }
+
+        // PID pressure scale: SNIPER_PID_PRESSURE_SCALE
+        if let Ok(val) = env::var("SNIPER_PID_PRESSURE_SCALE") {
+            if let Ok(scale) = val.parse::<f64>() {
+                config.pid_pressure_scale = scale;
+            }
+        }
 
         config
     }
