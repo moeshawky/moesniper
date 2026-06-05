@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sniper-py"
-version = "0.7.1"
+version = "0.7.2"
 description = "Escape-proof precision file editing — Python bindings for moesniper"
 license = "MIT"
 requires-python = ">=3.10"

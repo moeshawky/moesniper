@@ -5,6 +5,20 @@ All notable changes to moesniper will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0.html).
 
+## [Unreleased]
+
+### Added
+- PID pacing configuration via `SNIPER_PID_BASE_MS`, `SNIPER_PID_ENTROPY_SCALE`, `SNIPER_PID_PRESSURE_SCALE` environment variables
+- Workspace configuration including `sniper-py` Python bindings crate
+- Risk telemetry and `recommended_action` now computed for both dry-run and real paths
+
+### Fixed
+- Eliminated redundant `SniperConfig::from_env()` calls in write path — config now forwarded through call chain (B10/B7 boundary violations resolved)
+- Removed redundant `ResourceGuard::auto(0.5)` in `write_atomic_impl` — caller's guard forwarded instead (B8/B13 boundary violations resolved)
+- Help text updated with missing DAL and PID environment variables
+
+---
+
 ## [0.7.1] - 2026-06-01
 
 ### Added
