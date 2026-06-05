@@ -8,8 +8,34 @@
 # --- Toolchain ---
 msrv = "1.87"
 
+# --- API Safety ---
+# Prevent Clippy from suggesting changes that break public API surface.
+avoid-breaking-exported-api = true
+
 # --- Complexity ---
 # Result<String, String> is a common pattern in this project (not truly complex).
-# Threshold set high to avoid false positives on error-handling return types.
-type-complexity-threshold = 50
+# type-complexity is allowed in Cargo.toml [lints.clippy], so this threshold is
+# a safety net if that allow is ever removed.
+type-complexity-threshold = 250
+
+# Cognitive complexity cap per function. Default is 25; 30 gives slight headroom
+# for the error-handling nesting patterns in cmd_splice and cmd_manifest.
 cognitive-complexity-threshold = 30
+
+# --- Function Design ---
+# Max parameters per function. Default is 7; pin it to prevent drift.
+max-fn-params-bools = 7
+
+# Max lines in a function body before Clippy flags it. Default is 100.
+too-many-lines-threshold = 100
+
+# Max arguments per function call before Clippy flags it. Default is 7.
+too-many-arguments-threshold = 7
+
+# --- Variable Naming ---
+# Max single-char binding names in a scope before Clippy flags it. Default is 5.
+single-char-binding-names-threshold = 5
+
+# --- Include Guard ---
+# Max file size (bytes) for include! macros. Default is 1MB.
+max-include-file-size = 1000000
