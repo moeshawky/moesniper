@@ -8,9 +8,9 @@ use llmosafe::ResourceGuard;
 
 use moesniper::{
     auto_indent_content, check_file_size, count_recent_backups, create_backup, find_latest_backup,
-    hex_decode, needs_indent_fix, normalize_path, purge_old_backups, recommend_from_risk,
-    validate_indentation, verify_context, write_atomic_with_dal, RiskTelemetry, SniperConfig,
-    SniperLock, NAME, VERSION,
+    generate_preview, handle_backtrack_error, hex_decode, needs_indent_fix, normalize_path,
+    purge_old_backups, recommend_from_risk, validate_indentation, verify_context,
+    write_atomic_with_dal, RiskTelemetry, SniperConfig, SniperLock, NAME, VERSION,
 };
 
 /// Python bindings for moesniper — escape-proof precision file editing.
@@ -40,6 +40,7 @@ fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(count_recent_backups_py, m)?)?;
     m.add_function(wrap_pyfunction!(purge_old_backups_py, m)?)?;
     m.add_function(wrap_pyfunction!(version_py, m)?)?;
+    m.add_function(wrap_pyfunction!(generate_preview_py, m)?)?;
     Ok(())
 }
 
@@ -66,12 +67,14 @@ fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 ///         - risk (str, optional): JSON-encoded risk telemetry.
 ///         - recommended_action (str, optional): Resource-driven recommendation.
 ///         - ai_hint (str, optional): AI-consumable guidance hint.
+///         - diff_preview (str, optional): Dry-run diff preview (only present when dry_run=True).
 ///         - message (str, optional): Error message if status is "error".
 ///
 /// Raises:
 ///     ValueError: Invalid path, line range out of bounds, file too large.
 ///     RuntimeError: Lock acquisition failure, backup failure, write failure.
 ///     IOError: File read/write failures.
+/// 8 params required for PyO3 function signature; can't reduce.
 #[allow(clippy::too_many_arguments)]
 #[pyfunction(signature = (filepath, start, end, content, auto_indent=None, force_indent=None, context_hash=None, dry_run=None))]
 fn sniper_edit(
@@ -178,24 +181,27 @@ fn sniper_edit(
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            let _ = preview;
-            Ok((modified.len(), removed, new_lines.len(), bk))
+            Ok((modified.len(), removed, new_lines.len(), bk, Some(preview)))
         } else {
             write_atomic_with_dal(filepath, &refs, &guard, config.dal_level)?;
             let _ = purge_old_backups(filepath, &config);
 
-            Ok((modified.len(), removed, new_lines.len(), bk))
+            Ok((modified.len(), removed, new_lines.len(), bk, None))
         }
     })();
 
     let dict = PyDict::new(py);
     match result {
-        Ok((total, removed, inserted, bk)) => {
+        Ok((total, removed, inserted, bk, preview)) => {
             dict.set_item("status", "ok")?;
             dict.set_item("lines_removed", removed)?;
             dict.set_item("lines_inserted", inserted)?;
             dict.set_item("total_lines", total)?;
             dict.set_item("backup_path", bk)?;
+
+            if let Some(ref preview_str) = preview {
+                dict.set_item("diff_preview", preview_str)?;
+            }
 
             let risk_json = serde_json::to_string(&risk).unwrap_or_default();
             dict.set_item("risk", risk_json)?;
@@ -242,6 +248,8 @@ fn sniper_delete(py: Python<'_>, filepath: &str, start: usize, end: usize) -> Py
 /// Operations are applied bottom-up (by start line, descending) so that
 /// line numbers in earlier operations remain valid after later operations.
 /// Writes are gated by a ResourceGuard and Defense-Ascension Level.
+/// Supports auto-indentation detection and per-operation indentation validation
+/// mirroring the CLI manifest path.
 ///
 /// Args:
 ///     filepath (str): Path to the target file.
@@ -251,6 +259,10 @@ fn sniper_delete(py: Python<'_>, filepath: &str, start: usize, end: usize) -> Py
 ///             end (int, optional): 1-based end line (default: start).
 ///             hex (str, optional): Hex-encoded content to insert.
 ///             delete (bool, optional): If true, deletes the range.
+///     auto_indent (bool, optional): Auto-detect and apply indentation per op. Default None.
+///     force_indent (bool, optional): Bypass indentation validation per op. Default None.
+///     context_hash (str, optional): Reserved for future per-operation context verification.
+///     dry_run (bool, optional): Preview without applying changes. Default None.
 ///
 /// Returns:
 ///     dict: Result with keys:
@@ -259,16 +271,31 @@ fn sniper_delete(py: Python<'_>, filepath: &str, start: usize, end: usize) -> Py
 ///         - lines_inserted (int): Total lines inserted across all ops.
 ///         - total_lines (int): Total lines in the file after manifest.
 ///         - operations (int): Number of operations applied.
+///         - backup_path (str): Path to the backup file (empty string if dry_run).
+///         - risk (str): JSON-encoded risk telemetry.
+///         - recommended_action (str): Resource-driven recommendation.
+///         - ai_hint (str, optional): AI-consumable guidance hint.
 ///         - message (str, optional): Error message on failure.
 ///
 /// Raises:
 ///     ValueError: Invalid JSON, invalid hex, invalid line ranges.
 ///     RuntimeError: Lock/backup/write/resource failures.
 ///     IOError: File read failures.
-#[pyfunction]
-fn sniper_manifest(py: Python<'_>, filepath: &str, operations_json: &str) -> PyResult<Py<PyDict>> {
+/// Indent params, dry_run, and context_hash default to None for backward compatibility.
+#[pyfunction(signature = (filepath, operations_json, auto_indent=None, force_indent=None, context_hash=None, dry_run=None))]
+#[allow(unused_variables)]
+fn sniper_manifest(
+    py: Python<'_>,
+    filepath: &str,
+    operations_json: &str,
+    auto_indent: Option<bool>,
+    force_indent: Option<bool>,
+    context_hash: Option<&str>,
+    dry_run: Option<bool>,
+) -> PyResult<Py<PyDict>> {
     let config = SniperConfig::from_env();
     let guard = ResourceGuard::auto(0.5);
+    let risk = RiskTelemetry::from_guard(&guard);
 
     let result = (|| -> Result<_, String> {
         normalize_path(filepath)?;
@@ -284,12 +311,18 @@ fn sniper_manifest(py: Python<'_>, filepath: &str, operations_json: &str) -> PyR
             }
         }
 
-        let text = fs::read_to_string(filepath).map_err(|e| format!("read {filepath}: {e}"))?;
+        let text =
+            fs::read_to_string(filepath)
+                .map_err(|e| handle_backtrack_error(e, "Read"))?;
         let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
         ops.sort_by_key(|b| std::cmp::Reverse(b.start));
 
-        let bk = create_backup(filepath)?;
+        let bk = if !dry_run.unwrap_or(false) {
+            create_backup(filepath)?
+        } else {
+            String::new()
+        };
         let mut total_removed = 0usize;
         let mut total_inserted = 0usize;
 
@@ -311,7 +344,36 @@ fn sniper_manifest(py: Python<'_>, filepath: &str, operations_json: &str) -> PyR
                 total_removed += removed;
             } else if let Some(ref hex) = op.hex {
                 let decoded = hex_decode(hex)?;
-                let new: Vec<String> = decoded.split_inclusive('\n').map(String::from).collect();
+
+                // Apply auto-indent if needed (mirrors CLI cmd_manifest_impl)
+                let final_content =
+                    if auto_indent.unwrap_or(false)
+                        && needs_indent_fix(&lines, op.start, e, &decoded)
+                    {
+                        auto_indent_content(&lines, op.start, e, &decoded)
+                    } else {
+                        decoded
+                    };
+
+                // Validate indentation (skip if force_indent or dry_run)
+                if !force_indent.unwrap_or(false) && !dry_run.unwrap_or(false) {
+                    let new_lines_for_check: Vec<String> = final_content
+                        .split_inclusive('\n')
+                        .map(String::from)
+                        .collect();
+                    let (valid, warning, _) =
+                        validate_indentation(&lines, op.start, e, &new_lines_for_check);
+                    if !valid {
+                        return Err(format!(
+                            "indentation validation failed at line {}: {}",
+                            op.start,
+                            warning.as_deref().unwrap_or_default()
+                        ));
+                    }
+                }
+
+                let new: Vec<String> =
+                    final_content.split_inclusive('\n').map(String::from).collect();
                 let removed = lines.splice(range_start..e, new.clone()).count();
                 total_removed += removed;
                 total_inserted += new.len();
@@ -319,20 +381,36 @@ fn sniper_manifest(py: Python<'_>, filepath: &str, operations_json: &str) -> PyR
         }
 
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-        write_atomic_with_dal(filepath, &refs, &guard, config.dal_level)?;
-        let _ = purge_old_backups(filepath, &config);
+        if !dry_run.unwrap_or(false) {
+            write_atomic_with_dal(filepath, &refs, &guard, config.dal_level)?;
+            let _ = purge_old_backups(filepath, &config);
+        }
 
         Ok((lines.len(), total_removed, total_inserted, ops.len(), bk))
     })();
 
     let dict = PyDict::new(py);
     match result {
-        Ok((total, removed, inserted, count, _bk)) => {
+        Ok((total, removed, inserted, count, bk)) => {
             dict.set_item("status", "ok")?;
             dict.set_item("lines_removed", removed)?;
             dict.set_item("lines_inserted", inserted)?;
             dict.set_item("total_lines", total)?;
             dict.set_item("operations", count)?;
+            dict.set_item("backup_path", bk)?;
+
+            let risk_json = serde_json::to_string(&risk).unwrap_or_default();
+            dict.set_item("risk", risk_json)?;
+            dict.set_item("recommended_action", recommend_from_risk(&risk))?;
+
+            let backup_count =
+                count_recent_backups(filepath, config.lock_timeout.as_secs()).unwrap_or(0);
+            if backup_count >= 3 {
+                dict.set_item(
+                    "ai_hint",
+                    "Multiple edits to this file. Consider batching with manifest.",
+                )?;
+            }
         }
         Err(msg) => {
             dict.set_item("status", "error")?;
@@ -756,6 +834,35 @@ fn purge_old_backups_py(filepath: &str, retention_count: usize, max_age_days: u6
     purge_old_backups(filepath, &config)
         .map(|_| 0)
         .map_err(PyIOError::new_err)
+}
+
+/// Generate a diff preview for dry-run without modifying files.
+///
+/// Args:
+///     filepath (str): Path to the target file.
+///     start (int): Start line of edit range (1-based).
+///     end (int): End line of edit range (1-based).
+///     replacement (str): Content that would replace the range.
+///
+/// Returns:
+///     dict: Result with key:
+///         - preview (list[str]): Lines of unified diff-style preview.
+///
+/// Raises:
+///     IOError: File not found or read error.
+#[pyfunction]
+fn generate_preview_py(py: Python<'_>, filepath: &str, start: usize, end: usize, replacement: &str) -> PyResult<Py<PyDict>> {
+    let text: Vec<String> = fs::read_to_string(filepath)
+        .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
+        .split_inclusive('\n')
+        .map(String::from)
+        .collect();
+    let new_lines: Vec<String> = replacement.split_inclusive('\n').map(String::from).collect();
+
+    let preview = generate_preview(&text, &new_lines, start, end);
+    let dict = PyDict::new(py);
+    dict.set_item("preview", preview)?;
+    Ok(dict.into())
 }
 
 /// Internal structure for deserializing manifest operations from JSON.

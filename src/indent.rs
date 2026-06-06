@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 /// Represents the indentation style detected from context.
 #[derive(Debug, Clone, PartialEq)]
-pub struct IndentStyle {
+struct IndentStyle {
     /// Number of spaces per indent level (0 if using tabs).
     pub spaces: usize,
     /// Whether this file uses tab indentation.
@@ -54,7 +54,7 @@ const SUPERMAJORITY_RATIO: f64 = 0.80;
 /// Detects indentation style using statistical mode of indent step sizes.
 /// Uses supermajority threshold for tabs-vs-spaces decision.
 /// Samples all non-empty lines for accuracy (not just first 20).
-pub fn detect_indent_style(lines: &[String]) -> IndentStyle {
+fn detect_indent_style(lines: &[String]) -> IndentStyle {
     let mut space_levels: Vec<usize> = Vec::new();
     let mut tab_levels: Vec<usize> = Vec::new();
 
@@ -175,10 +175,9 @@ const MAX_SCAN_BACK: usize = 20;
 ///
 /// Handles: `{` (+1 level), `}` (−1 level for content after), `:` (+1),
 /// `(` and `[` (continuation: +1 level for next line).
-pub fn detect_expected_indent(
+fn detect_expected_indent(
     all_lines: &[String],
     start_line: usize,
-    _end_line: usize,
 ) -> (IndentStyle, usize) {
     let idx = start_line.saturating_sub(1);
     let window_start = idx.saturating_sub(MAX_SCAN_BACK);
@@ -323,10 +322,10 @@ fn strip_trailing_comment(s: &str) -> &str {
 pub fn validate_indentation(
     all_lines: &[String],
     start_line: usize,
-    end_line: usize,
+    _end_line: usize,
     replacement_lines: &[String],
 ) -> (bool, Option<String>, Option<String>) {
-    let (style, expected_level) = detect_expected_indent(all_lines, start_line, end_line);
+    let (style, expected_level) = detect_expected_indent(all_lines, start_line);
     let expected_indent = style.indent_string(expected_level);
 
     let mut has_content = false;
@@ -394,10 +393,10 @@ pub fn validate_indentation(
 pub fn auto_indent_content(
     all_lines: &[String],
     start_line: usize,
-    end_line: usize,
+    _end_line: usize,
     content: &str,
 ) -> String {
-    let (style, expected_level) = detect_expected_indent(all_lines, start_line, end_line);
+    let (style, expected_level) = detect_expected_indent(all_lines, start_line);
     let expected_indent = style.indent_string(expected_level);
 
     if expected_indent.is_empty() {
@@ -426,10 +425,10 @@ pub fn auto_indent_content(
 pub fn needs_indent_fix(
     all_lines: &[String],
     start_line: usize,
-    end_line: usize,
+    _end_line: usize,
     content: &str,
 ) -> bool {
-    let (style, expected_level) = detect_expected_indent(all_lines, start_line, end_line);
+    let (style, expected_level) = detect_expected_indent(all_lines, start_line);
     let expected_indent = style.indent_string(expected_level);
 
     if expected_indent.is_empty() {
@@ -554,14 +553,14 @@ mod tests {
     #[test]
     fn test_expected_indent_after_colon() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
-        let (_, level) = detect_expected_indent(&all_lines, 2, 2);
+        let (_, level) = detect_expected_indent(&all_lines, 2);
         assert_eq!(level, 1);
     }
 
     #[test]
     fn test_expected_indent_after_brace() {
         let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
-        let (_, level) = detect_expected_indent(&all_lines, 2, 2);
+        let (_, level) = detect_expected_indent(&all_lines, 2);
         assert_eq!(level, 1, "Content after `{{` should be indent level 1");
     }
 
@@ -574,7 +573,7 @@ mod tests {
             "    }\n".to_string(),
             "    // editing here\n".to_string(),
         ];
-        let (_, level) = detect_expected_indent(&all_lines, 5, 5);
+        let (_, level) = detect_expected_indent(&all_lines, 5);
         assert_eq!(
             level, 1,
             "Content after `}}` at outer level should be level 1, not 2"
@@ -584,7 +583,7 @@ mod tests {
     #[test]
     fn test_expected_indent_top_of_file() {
         let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
-        let (_, level) = detect_expected_indent(&all_lines, 1, 1);
+        let (_, level) = detect_expected_indent(&all_lines, 1);
         assert_eq!(level, 0);
     }
 
@@ -596,7 +595,7 @@ mod tests {
             "        if True:\n".to_string(),
             "            pass\n".to_string(),
         ];
-        let (_, level) = detect_expected_indent(&all_lines, 4, 4);
+        let (_, level) = detect_expected_indent(&all_lines, 4);
         assert_eq!(level, 3);
     }
 
@@ -609,7 +608,7 @@ mod tests {
             "\n".to_string(),
             "    // editing here\n".to_string(),
         ];
-        let (_, level) = detect_expected_indent(&all_lines, 5, 5);
+        let (_, level) = detect_expected_indent(&all_lines, 5);
         assert_eq!(level, 1, "Blank lines must be skipped to find real context");
     }
 
@@ -625,7 +624,7 @@ mod tests {
             "    let e = 6;\n".to_string(),
             "  // editing here\n".to_string(),
         ];
-        let (_, level) = detect_expected_indent(&all_lines, 8, 8);
+        let (_, level) = detect_expected_indent(&all_lines, 8);
         assert_eq!(
             level, 1,
             "A single misindented line must not poison context detection"
@@ -638,7 +637,7 @@ mod tests {
             "fn main() {\n".to_string(),
             "   let x = 1;\n".to_string(), // 3 spaces, should be 4
         ];
-        let (_, level) = detect_expected_indent(&all_lines, 2, 2);
+        let (_, level) = detect_expected_indent(&all_lines, 2);
         assert_eq!(
             level, 1,
             "3 spaces in a 4-space file should round to level 1, not 0"
@@ -656,7 +655,7 @@ mod tests {
             "\n".to_string(),                // blank
             "// editing here\n".to_string(),
         ];
-        let (_, level) = detect_expected_indent(&all_lines, 6, 6);
+        let (_, level) = detect_expected_indent(&all_lines, 6);
         assert_eq!(
             level, 1,
             "Must scan past blank+anomaly to find the real context"
@@ -675,7 +674,7 @@ mod tests {
         }
         lines.push("    // editing here\n".to_string());
 
-        let (style, _) = detect_expected_indent(&lines, 5, 5);
+        let (style, _) = detect_expected_indent(&lines, 5);
         assert_eq!(
             style.spaces, 4,
             "Edit near 4-space context should detect 4-space step, not 8 (deep body bias)"
@@ -688,7 +687,7 @@ mod tests {
         all_lines.push("    my_function(\n".to_string());
         all_lines.push("        arg1,\n".to_string());
         all_lines.push("        arg2,\n".to_string());
-        let (_, level) = detect_expected_indent(&all_lines, 24, 24);
+        let (_, level) = detect_expected_indent(&all_lines, 24);
         assert_eq!(
             level, 2,
             "Comma means same-level continuation, not deeper indent"

@@ -38,6 +38,10 @@ use llmosafe::ResourceGuard;
 use sha2::Digest;
 
 /// Directory name for storing backups and lock files.
+///
+/// Internal constant: used by backup, lock, and purge utilities.
+/// Not intended for direct external use — access via `create_backup`,
+/// `find_latest_backup`, and `purge_old_backups`.
 pub const BACKUP_DIR: &str = ".sniper";
 
 /// Snapshot of memory statistics from a ResourceGuard at a point in time.
@@ -160,6 +164,7 @@ impl PidConfig {
     ///
     /// # Returns
     /// A `Duration` representing how long to sleep before proceeding.
+    // u64/f64 casts are explicit and bounded; truncation is controlled by input range
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn sleep_duration(&self, entropy: u64, pressure: u8) -> Duration {
         let ms = self.base_ms

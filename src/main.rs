@@ -67,7 +67,9 @@ fn main() {
     let force_indent = args.iter().any(|a| a == "--force-indent");
 
     let mut context_hash: Option<String> = None;
+    let mut ctx_pos: Option<usize> = None;
     if let Some(pos) = args.iter().position(|a| a == "--context") {
+        ctx_pos = Some(pos);
         if pos + 1 < args.len() {
             context_hash = Some(args[pos + 1].clone());
         }
@@ -77,9 +79,8 @@ fn main() {
         .iter()
         .enumerate()
         .filter(|(i, a)| {
-            if context_hash.is_some() {
-                let ctx_pos = args.iter().position(|x| x == "--context").unwrap();
-                if *i == ctx_pos || *i == ctx_pos + 1 {
+            if let Some(pos) = ctx_pos {
+                if *i == pos || *i == pos + 1 {
                     return false;
                 }
             }
@@ -279,6 +280,7 @@ fn cmd_encode(text: &str) -> CliResult {
     }
 }
 
+/// 11 params needed for CLI dispatch: 4 positional + 4 flags + context_hash; can't reduce.
 #[allow(clippy::too_many_arguments)]
 fn cmd_splice(
     filepath: &str,
@@ -569,7 +571,10 @@ fn cmd_manifest_impl(
         if op.delete.unwrap_or(false) {
             total_removed += lines.splice(s..e, std::iter::empty()).count();
         } else if let Some(ref hex) = op.hex {
-            let content = hex_decode(hex).unwrap(); // Pre-validated above
+            let content = match hex_decode(hex) {
+                Ok(c) => c,
+                Err(e) => return err(format!("hex decode: {e}")),
+            };
 
             // Apply auto-indent if needed
             let final_content = if auto_indent && needs_indent_fix(&lines, op.start, e, &content) {

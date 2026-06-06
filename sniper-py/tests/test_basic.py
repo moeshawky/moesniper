@@ -243,3 +243,248 @@ class TestConfig:
         monkeypatch.setenv("SNIPER_LOCK_TIMEOUT", "5")
         cfg = sniper.config()
         assert cfg["lock_timeout_secs"] == 5
+
+
+# ── Indentation Utilities ─────────────────────────────────────────────────
+
+
+class TestValidateIndentation:
+    """Test validate_indentation Python binding."""
+
+    @pytest.fixture
+    def indented_file(self, tmp_path: Path) -> Path:
+        """Create a test file with Python-style indentation."""
+        f = tmp_path / "indented.py"
+        f.write_text("def foo():\n    pass\n")
+        return f
+
+    def test_missing_indent_reported(self, sniper, indented_file):
+        """Unindented replacement at expected-indent site fails validation."""
+        result = sniper.validate_indentation(str(indented_file), 2, 2, "print('hello')")
+        assert result["valid"] is False
+        assert "4 space" in result["message"]
+
+    def test_correct_indent_passes(self, sniper, indented_file):
+        """Correctly indented replacement passes validation."""
+        result = sniper.validate_indentation(str(indented_file), 2, 2, "    print('hello')")
+        assert result["valid"] is True
+
+
+class TestAutoIndentContent:
+    """Test auto_indent_content Python binding."""
+
+    def test_adds_expected_indent(self, sniper, test_file):
+        """Auto-indent prepends the detected indent level."""
+        test_file.write_text("def foo():\n    pass\n")
+        result = sniper.auto_indent_content(str(test_file), 2, 2, "print('hello')")
+        assert result == "    print('hello')"
+
+
+class TestNeedsIndentFix:
+    """Test needs_indent_fix Python binding."""
+
+    def test_detects_unindented(self, sniper, test_file):
+        """Unindented content triggers needs_indent_fix."""
+        test_file.write_text("def foo():\n    pass\n")
+        assert sniper.needs_indent_fix(str(test_file), 2, 2, "print('x')") is True
+
+    def test_correct_indent_passes(self, sniper, test_file):
+        """Already-correct indent returns False."""
+        test_file.write_text("def foo():\n    pass\n")
+        assert sniper.needs_indent_fix(str(test_file), 2, 2, "    print('x')") is False
+
+
+# ── Context Verification ─────────────────────────────────────────────────
+
+
+class TestVerifyContext:
+    """Test verify_context Python binding."""
+
+    def test_hash_mismatch(self, sniper, test_file):
+        """A known-bad hash returns valid=False."""
+        result = sniper.verify_context(str(test_file), 3, 3, "0000000000000000")
+        assert result["valid"] is False
+
+
+# ── Risk / Write DAL ──────────────────────────────────────────────────────
+
+
+class TestRecommendFromRisk:
+    """Test recommend_from_risk Python binding."""
+
+    def test_returns_string(self, sniper):
+        """recommend_from_risk returns a non-empty string."""
+        rec = sniper.recommend_from_risk()
+        assert isinstance(rec, str)
+        assert len(rec) > 0
+
+
+class TestWriteAtomicWithDal:
+    """Test write_atomic_with_dal Python binding."""
+
+    def test_writes_baseline(self, sniper, tmp_path):
+        """Baseline DAL level writes content to file."""
+        path = str(tmp_path / "dal_test.txt")
+        assert not Path(path).exists()
+        result = sniper.write_atomic_with_dal(path, "hello\nworld", "BASELINE")
+        assert result["status"] == "ok"
+        assert Path(path).read_text() == "hello\nworld"
+
+    def test_invalid_dal_level(self, sniper):
+        """Invalid DAL level raises ValueError."""
+        with pytest.raises(ValueError):
+            sniper.write_atomic_with_dal("/tmp/ignored.txt", "x", "INVALID")
+
+
+# ── File Utilities ────────────────────────────────────────────────────────
+
+
+class TestCheckFileSize:
+    """Test check_file_size Python binding."""
+
+    def test_within_limit(self, sniper, test_file):
+        """File within size limit returns True."""
+        size = test_file.stat().st_size
+        assert sniper.check_file_size(str(test_file), size + 1) is True
+
+    def test_exceeds_limit(self, sniper, test_file):
+        """File exceeding limit raises OSError."""
+        size = test_file.stat().st_size
+        with pytest.raises(OSError):
+            sniper.check_file_size(str(test_file), size - 1)
+
+
+class TestNormalizePath:
+    """Test normalize_path Python binding."""
+
+    def test_normalizes_relative(self, sniper, test_file):
+        """Relative path is expanded to absolute."""
+        normalized = sniper.normalize_path(str(test_file))
+        assert Path(normalized).is_absolute()
+
+    def test_rejects_traversal(self, sniper):
+        """Path traversal raises ValueError."""
+        with pytest.raises(ValueError):
+            sniper.normalize_path("../../../etc/passwd")
+
+
+class TestCreateBackup:
+    """Test create_backup Python binding."""
+
+    def test_creates_backup_file(self, sniper, test_file):
+        """create_backup returns path to an existing backup."""
+        path = sniper.create_backup(str(test_file))
+        assert Path(path).exists()
+        assert ".sniper" in path
+
+
+class TestFindLatestBackup:
+    """Test find_latest_backup Python binding."""
+
+    def test_returns_none_when_no_backup(self, sniper, test_file):
+        """No backups means None result."""
+        assert sniper.find_latest_backup(str(test_file)) is None
+
+    def test_finds_backup_after_edit(self, sniper, test_file):
+        """Edit creates a backup that find_latest_backup can locate."""
+        sniper.edit(str(test_file), 1, 1, "changed")
+        latest = sniper.find_latest_backup(str(test_file))
+        assert latest is not None
+
+
+class TestCountRecentBackups:
+    """Test count_recent_backups Python binding."""
+
+    def test_counts_within_window(self, sniper, test_file):
+        """Recently created backups are counted."""
+        sniper.edit(str(test_file), 1, 1, "a")
+        sniper.edit(str(test_file), 1, 1, "b")
+        count = sniper.count_recent_backups(str(test_file), 3600)
+        assert isinstance(count, int)
+        assert count >= 1
+
+
+class TestPurgeOldBackups:
+    """Test purge_old_backups Python binding."""
+
+    def test_purge_returns_int(self, sniper, test_file):
+        """purge_old_backups returns an integer count."""
+        purged = sniper.purge_old_backups(str(test_file), 50, 30)
+        assert isinstance(purged, int)
+
+
+# ── Version ───────────────────────────────────────────────────────────────
+
+
+class TestVersion:
+    """Test version Python binding."""
+
+    def test_returns_name_and_version(self, sniper):
+        """version() returns dict with name and version keys."""
+        v = sniper.version()
+        assert isinstance(v, dict)
+        assert "name" in v
+        assert "version" in v
+        assert v["name"] == "moesniper"
+
+    def test_version_is_semver(self, sniper):
+        """version string follows semver pattern."""
+        v = sniper.version()
+        parts = v["version"].split(".")
+        assert len(parts) == 3
+        assert all(p.isdigit() for p in parts)
+
+
+# ── Generate Preview ──────────────────────────────────────────────────────
+
+
+class TestGeneratePreview:
+    """Test generate_preview Python binding."""
+
+    def test_generates_preview_lines(self, sniper, test_file):
+        """generate_preview returns a dict with preview list."""
+        result = sniper.generate_preview(str(test_file), 2, 4, "replacement\n")
+        assert "preview" in result
+        assert isinstance(result["preview"], list)
+        assert len(result["preview"]) > 0
+
+
+# ── Manifest with Indent ──────────────────────────────────────────────────
+
+
+class TestManifestIndent:
+    """Test manifest operation with indent parameters."""
+
+    def test_manifest_dry_run(self, sniper, test_file):
+        """Manifest dry_run does not modify the file."""
+        path = str(test_file)
+        original = test_file.read_text()
+        ops = json.dumps([{"start": 1, "end": 1, "hex": sniper.encode("x")}])
+        result = sniper.manifest(path, ops, dry_run=True)
+        assert result["status"] == "ok"
+        assert test_file.read_text() == original
+
+    def test_manifest_force_indent(self, sniper, test_file):
+        """Manifest with force_indent=True bypasses validation."""
+        path = str(test_file)
+        ops = json.dumps([{"start": 1, "end": 1, "hex": sniper.encode("x")}])
+        result = sniper.manifest(path, ops, force_indent=True)
+        assert result["status"] == "ok"
+        assert result["backup_path"] != ""
+
+    def test_manifest_returns_risk(self, sniper, test_file):
+        """Manifest result includes risk, recommended_action, and backup_path."""
+        path = str(test_file)
+        ops = json.dumps([{"start": 1, "end": 1, "hex": sniper.encode("x")}])
+        result = sniper.manifest(path, ops)
+        assert result["status"] == "ok"
+        assert "risk" in result
+        assert "recommended_action" in result
+        assert "backup_path" in result
+
+    def test_manifest_no_indent_needed(self, sniper, test_file):
+        """Manifest with auto_indent=True on already-correct content succeeds."""
+        path = str(test_file)
+        ops = json.dumps([{"start": 1, "end": 1, "hex": sniper.encode("x")}])
+        result = sniper.manifest(path, ops, auto_indent=True)
+        assert result["status"] == "ok"
