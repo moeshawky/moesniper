@@ -15,6 +15,11 @@ AGENTS.md
 references/
 .cursor/
 .claude/
+.ad-*.md
+.cam-*.md
+.cbp-*.md
+.clippy-fixes.md
+extract.md
 
 # ── IDE / Editor ──────────────────────────────────────────────────────────────
 .idea/
