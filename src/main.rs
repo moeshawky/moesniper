@@ -55,6 +55,11 @@ fn main() {
         std::process::exit(0);
     }
 
+    if args[0] == "-v" || args[0] == "--version" {
+        println!("{} {}", moesniper::NAME, moesniper::VERSION);
+        std::process::exit(0);
+    }
+
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let json_out = args.iter().any(|a| a == "--json");
     let use_stdin = args.iter().any(|a| a == "--stdin");

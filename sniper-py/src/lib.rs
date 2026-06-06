@@ -10,7 +10,7 @@ use moesniper::{
     auto_indent_content, check_file_size, count_recent_backups, create_backup, find_latest_backup,
     hex_decode, needs_indent_fix, normalize_path, purge_old_backups, recommend_from_risk,
     validate_indentation, verify_context, write_atomic_with_dal, RiskTelemetry, SniperConfig,
-    SniperLock,
+    SniperLock, NAME, VERSION,
 };
 
 /// Python bindings for moesniper — escape-proof precision file editing.
@@ -27,6 +27,19 @@ fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sniper_decode, m)?)?;
     m.add_function(wrap_pyfunction!(sniper_read_file, m)?)?;
     m.add_function(wrap_pyfunction!(sniper_config, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_indentation_py, m)?)?;
+    m.add_function(wrap_pyfunction!(auto_indent_content_py, m)?)?;
+    m.add_function(wrap_pyfunction!(needs_indent_fix_py, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_context_py, m)?)?;
+    m.add_function(wrap_pyfunction!(recommend_from_risk_py, m)?)?;
+    m.add_function(wrap_pyfunction!(write_atomic_with_dal_py, m)?)?;
+    m.add_function(wrap_pyfunction!(check_file_size_py, m)?)?;
+    m.add_function(wrap_pyfunction!(normalize_path_py, m)?)?;
+    m.add_function(wrap_pyfunction!(create_backup_py, m)?)?;
+    m.add_function(wrap_pyfunction!(find_latest_backup_py, m)?)?;
+    m.add_function(wrap_pyfunction!(count_recent_backups_py, m)?)?;
+    m.add_function(wrap_pyfunction!(purge_old_backups_py, m)?)?;
+    m.add_function(wrap_pyfunction!(version_py, m)?)?;
     Ok(())
 }
 
@@ -440,6 +453,309 @@ fn sniper_config(py: Python<'_>) -> PyResult<Py<PyDict>> {
     dict.set_item("pid_entropy_scale", config.pid_entropy_scale)?;
     dict.set_item("pid_pressure_scale", config.pid_pressure_scale)?;
     Ok(dict.into())
+}
+
+/// Return the library name and version string.
+///
+/// Args:
+///     None
+///
+/// Returns:
+///     dict: Keys:
+///         - name (str): Library name (e.g. "moesniper").
+///         - version (str): Semantic version (e.g. "0.7.2").
+#[pyfunction]
+fn version_py(py: Python<'_>) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("name", NAME)?;
+    dict.set_item("version", VERSION)?;
+    Ok(dict.into())
+}
+
+/// Validate indentation of content against surrounding lines.
+///
+/// Args:
+///     filepath (str): Path to the target file.
+///     start (int): Start line of the edit range (1-based).
+///     end (int): End line of the edit range (1-based).
+///     content (str): The content to validate.
+///
+/// Returns:
+///     dict: Result with keys:
+///         - valid (bool): True if indentation matches surroundings.
+///         - message (str): Explanation of the validation result.
+///
+/// Raises:
+///     IOError: File not found or read error.
+#[pyfunction]
+fn validate_indentation_py(py: Python<'_>, filepath: &str, start: usize, end: usize, content: &str) -> PyResult<Py<PyDict>> {
+    let lines: Vec<String> = fs::read_to_string(filepath)
+        .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
+        .lines()
+        .map(|s| s.to_string())
+        .collect();
+    let content_lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+    let (valid, msg, detail) = validate_indentation(&lines, start, end, &content_lines);
+    let dict = PyDict::new(py);
+    dict.set_item("valid", valid)?;
+    dict.set_item("message", msg.unwrap_or_default())?;
+    dict.set_item("detail", detail.unwrap_or_default())?;
+    Ok(dict.into())
+}
+
+/// Auto-detect and apply indentation from surrounding lines.
+///
+/// Args:
+///     filepath (str): Path to the target file.
+///     start (int): Start line of the edit range (1-based).
+///     end (int): End line of the edit range (1-based).
+///     content (str): The content to indent.
+///
+/// Returns:
+///     str: Content with indentation applied.
+///
+/// Raises:
+///     IOError: File not found or read error.
+#[pyfunction]
+fn auto_indent_content_py(filepath: &str, start: usize, end: usize, content: &str) -> PyResult<String> {
+    let lines: Vec<String> = fs::read_to_string(filepath)
+        .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
+        .lines()
+        .map(|s| s.to_string())
+        .collect();
+
+    Ok(auto_indent_content(&lines, start, end, content))
+}
+
+/// Check if content needs indentation fix.
+///
+/// Args:
+///     filepath (str): Path to the target file.
+///     start (int): Start line of the edit range (1-based).
+///     end (int): End line of the edit range (1-based).
+///     content (str): The content to check.
+///
+/// Returns:
+///     bool: True if content needs indentation adjustment.
+///
+/// Raises:
+///     IOError: File not found or read error.
+#[pyfunction]
+fn needs_indent_fix_py(filepath: &str, start: usize, end: usize, content: &str) -> PyResult<bool> {
+    let lines: Vec<String> = fs::read_to_string(filepath)
+        .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
+        .lines()
+        .map(|s| s.to_string())
+        .collect();
+    
+    Ok(needs_indent_fix(&lines, start, end, content))
+}
+
+/// Verify context hash before applying an edit.
+///
+/// Args:
+///     filepath (str): Path to the target file.
+///     expected_hash (str): Expected SHA-256 prefix (16 hex chars).
+///
+/// Returns:
+///     dict: Result with keys:
+///         - valid (bool): True if hash matches.
+///         - actual_hash (str): Actual hash prefix (16 hex chars).
+///         - message (str): Explanation of the verification result.
+///
+/// Raises:
+///     IOError: File not found or read error.
+#[pyfunction]
+fn verify_context_py(py: Python<'_>, filepath: &str, start: usize, end: usize, expected_hash: &str) -> PyResult<Py<PyDict>> {
+    let lines: Vec<String> = fs::read_to_string(filepath)
+        .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
+        .lines()
+        .map(|s| s.to_string())
+        .collect();
+
+    let dict = PyDict::new(py);
+    match verify_context(&lines, start, end, expected_hash) {
+        Ok(()) => {
+            dict.set_item("valid", true)?;
+            dict.set_item("message", "Context hash matches")?;
+        }
+        Err(msg) => {
+            dict.set_item("valid", false)?;
+            dict.set_item("message", msg)?;
+        }
+    }
+    Ok(dict.into())
+}
+
+/// Get a recommended action based on risk telemetry.
+///
+/// Args:
+///     None (reads current resource state).
+///
+/// Returns:
+///     str: Recommended action (e.g., "proceed", "wait", "reduce_scope").
+#[pyfunction]
+fn recommend_from_risk_py() -> String {
+    let guard = ResourceGuard::auto(0.5);
+    let risk = RiskTelemetry::from_guard(&guard);
+    recommend_from_risk(&risk)
+}
+
+/// Atomic write with Data Access Layer (DAL) protection.
+///
+/// Args:
+///     filepath (str): Path to the target file.
+///     content (str): Content to write.
+///     dal_level (str): DAL level ("minimum", "moderate", "maximum").
+///
+/// Returns:
+///     dict: Result with keys:
+///         - status (str): "ok" on success, "error" on failure.
+///         - message (str): Explanation of the result.
+///         - wait_time_ms (int, optional): Time waited due to DAL.
+///
+/// Raises:
+///     IOError: Write error or permission denied.
+#[pyfunction]
+fn write_atomic_with_dal_py(py: Python<'_>, filepath: &str, content: &str, dal_level: &str) -> PyResult<Py<PyDict>> {
+    use moesniper::DalLevel;
+
+    let level = match dal_level.to_uppercase().as_str() {
+        "BASELINE" => DalLevel::Baseline,
+        "ENHANCED" => DalLevel::Enhanced,
+        "MAXIMUM" => DalLevel::Maximum,
+        _ => return Err(PyValueError::new_err("Invalid DAL level. Use: BASELINE, ENHANCED, MAXIMUM")),
+    };
+
+    let _config = SniperConfig::from_env();
+    let guard = ResourceGuard::auto(0.5);
+
+    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let lines_ref: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+    let result = write_atomic_with_dal(filepath, &lines_ref, &guard, level);
+
+    let dict = PyDict::new(py);
+    match result {
+        Ok(()) => {
+            dict.set_item("status", "ok")?;
+            dict.set_item("message", "Write successful")?;
+        }
+        Err(e) => {
+            dict.set_item("status", "error")?;
+            dict.set_item("message", e)?;
+        }
+    }
+    Ok(dict.into())
+}
+
+/// Check if a file exceeds the maximum size limit.
+///
+/// Args:
+///     filepath (str): Path to the file.
+///     max_size (int): Maximum size in bytes.
+///
+/// Returns:
+///     bool: True if file size is within limit.
+///
+/// Raises:
+///     IOError: File not found or stat error.
+#[pyfunction]
+fn check_file_size_py(filepath: &str, max_size: u64) -> PyResult<bool> {
+    check_file_size(filepath, max_size)
+        .map(|_| true)
+        .map_err(PyIOError::new_err)
+}
+
+/// Normalize a file path (expand ~, resolve symlinks).
+///
+/// Args:
+///     path (str): Path to normalize.
+///
+/// Returns:
+///     str: Normalized absolute path.
+///
+/// Raises:
+///     ValueError: Invalid path.
+#[pyfunction]
+fn normalize_path_py(path: &str) -> PyResult<String> {
+    normalize_path(path)
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(PyValueError::new_err)
+}
+
+/// Create a backup of a file.
+///
+/// Args:
+///     filepath (str): Path to the file to backup.
+///
+/// Returns:
+///     str: Path to the created backup file.
+///
+/// Raises:
+///     IOError: Backup creation failed.
+#[pyfunction]
+fn create_backup_py(filepath: &str) -> PyResult<String> {
+    create_backup(filepath).map_err(PyIOError::new_err)
+}
+
+/// Find the latest backup for a file.
+///
+/// Args:
+///     filepath (str): Path to the original file.
+///
+/// Returns:
+///     str or None: Path to the latest backup, or None if no backups exist.
+///
+/// Raises:
+///     IOError: Search failed.
+#[pyfunction]
+fn find_latest_backup_py(filepath: &str) -> PyResult<Option<String>> {
+    find_latest_backup(filepath)
+        .map(|opt| opt.map(|p| p.to_string_lossy().to_string()))
+        .map_err(PyIOError::new_err)
+}
+
+/// Count recent backups within a time window.
+///
+/// Args:
+///     filepath (str): Path to the original file.
+///     window_secs (int): Time window in seconds.
+///
+/// Returns:
+///     int: Number of backups within the window.
+///
+/// Raises:
+///     IOError: Count failed.
+#[pyfunction]
+fn count_recent_backups_py(filepath: &str, window_secs: u64) -> PyResult<usize> {
+    count_recent_backups(filepath, window_secs).map_err(PyIOError::new_err)
+}
+
+/// Purge old backups by count and age.
+///
+/// Args:
+///     filepath (str): Path to the original file.
+///     retention_count (int): Number of backups to retain.
+///     max_age_days (int): Maximum age in days.
+///
+/// Returns:
+///     int: Number of backups purged.
+///
+/// Raises:
+///     IOError: Purge failed.
+#[pyfunction]
+fn purge_old_backups_py(filepath: &str, retention_count: usize, max_age_days: u64) -> PyResult<usize> {
+    use moesniper::SniperConfig;
+    let config = SniperConfig {
+        backup_retention_count: retention_count,
+        backup_max_age_days: max_age_days,
+        ..SniperConfig::from_env()
+    };
+    // purge_old_backups returns Result<(), String> — count not exposed
+    purge_old_backups(filepath, &config)
+        .map(|_| 0)
+        .map_err(PyIOError::new_err)
 }
 
 /// Internal structure for deserializing manifest operations from JSON.

@@ -2,6 +2,12 @@
 #![deny(clippy::expect_used)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+/// Library version string (matches Cargo.toml).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Library name (matches Cargo.toml).
+pub const NAME: &str = env!("CARGO_PKG_NAME");
+
 /// Configuration types for sniper.
 pub mod config;
 /// Diff generation for dry-run previews.

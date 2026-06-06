@@ -17,6 +17,7 @@ FLAGS:
     --context <hash>    Verify context SHA-256 hash (first 16 hex chars) before applying
     --auto-indent       Auto-detect and apply indentation from context
     --force-indent      Bypass indentation validation (allow unindented content)
+    -v, --version       Print version and exit
 
 QUICK START:
     # Replace line 5 with "hello"
