@@ -32,15 +32,15 @@ Usage:
     config = sniper.config()
 """
 
-from sniper._native import (
-    sniper_edit,
-    sniper_delete,
-    sniper_manifest,
-    sniper_undo,
-    sniper_encode,
-    sniper_decode,
-    sniper_read_file,
+from moesniper._native import (
     sniper_config,
+    sniper_decode,
+    sniper_delete,
+    sniper_edit,
+    sniper_encode,
+    sniper_manifest,
+    sniper_read_file,
+    sniper_undo,
 )
 
 edit = sniper_edit
@@ -53,12 +53,12 @@ read_file = sniper_read_file
 config = sniper_config
 
 __all__ = [
-    "edit",
-    "delete",
-    "manifest",
-    "undo",
-    "encode",
-    "decode",
-    "read_file",
     "config",
+    "decode",
+    "delete",
+    "edit",
+    "encode",
+    "manifest",
+    "read_file",
+    "undo",
 ]

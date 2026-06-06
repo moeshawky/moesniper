@@ -39,3 +39,7 @@ single-char-binding-names-threshold = 5
 # --- Include Guard ---
 # Max file size (bytes) for include! macros. Default is 1MB.
 max-include-file-size = 1000000
+
+# --- Strict mode (opt-in) ---
+# Run with: cargo clippy -- -W clippy::pedantic
+# Pedantic lints are NOT enabled by default — they're opt-in for pre-publish audits.

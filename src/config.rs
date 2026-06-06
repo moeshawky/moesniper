@@ -28,9 +28,10 @@ impl DalLevel {
     /// Accepts "Baseline", "Enhanced", "Maximum" (case-insensitive).
     /// Returns `Baseline` for any unrecognized value.
     pub fn from_env() -> Self {
-        match env::var("SNIPER_DAL_LEVEL").as_deref() {
-            Ok("Enhanced") => Self::Enhanced,
-            Ok("Maximum") => Self::Maximum,
+        let val = env::var("SNIPER_DAL_LEVEL").unwrap_or_default();
+        match val.trim().to_uppercase().as_str() {
+            "ENHANCED" => Self::Enhanced,
+            "MAXIMUM" => Self::Maximum,
             _ => Self::Baseline,
         }
     }

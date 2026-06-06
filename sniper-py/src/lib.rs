@@ -4,9 +4,13 @@ use pyo3::exceptions::{PyIOError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use llmosafe::ResourceGuard;
+
 use moesniper::{
-    check_file_size, create_backup, find_latest_backup, hex_decode, normalize_path,
-    purge_old_backups, write_atomic, SniperConfig, SniperLock,
+    auto_indent_content, check_file_size, count_recent_backups, create_backup, find_latest_backup,
+    hex_decode, needs_indent_fix, normalize_path, purge_old_backups, recommend_from_risk,
+    validate_indentation, verify_context, write_atomic_with_dal, RiskTelemetry, SniperConfig,
+    SniperLock,
 };
 
 /// Python bindings for moesniper — escape-proof precision file editing.
@@ -34,6 +38,10 @@ fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 ///     end (int): Last line to replace (1-based, inclusive). To insert at a
 ///         position, set start == end. Must satisfy 1 <= start <= end.
 ///     content (str): New content to insert. Empty string deletes the range.
+///     auto_indent (bool, optional): Auto-detect and apply indentation. Default False.
+///     force_indent (bool, optional): Bypass indentation validation. Default False.
+///     context_hash (str, optional): SHA-256 prefix (16 hex chars) for pre-edit verification.
+///     dry_run (bool, optional): Preview changes without applying. Default False.
 ///
 /// Returns:
 ///     dict: Result with keys:
@@ -42,21 +50,31 @@ fn _native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
 ///         - lines_inserted (int): Number of lines inserted.
 ///         - total_lines (int): Total lines in the file after edit.
 ///         - backup_path (str): Path to the backup file created before edit.
+///         - risk (str, optional): JSON-encoded risk telemetry.
+///         - recommended_action (str, optional): Resource-driven recommendation.
+///         - ai_hint (str, optional): AI-consumable guidance hint.
 ///         - message (str, optional): Error message if status is "error".
 ///
 /// Raises:
 ///     ValueError: Invalid path, line range out of bounds, file too large.
 ///     RuntimeError: Lock acquisition failure, backup failure, write failure.
 ///     IOError: File read/write failures.
-#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+#[pyfunction(signature = (filepath, start, end, content, auto_indent=None, force_indent=None, context_hash=None, dry_run=None))]
 fn sniper_edit(
     py: Python<'_>,
     filepath: &str,
     start: usize,
     end: usize,
     content: &str,
+    auto_indent: Option<bool>,
+    force_indent: Option<bool>,
+    context_hash: Option<&str>,
+    dry_run: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
     let config = SniperConfig::from_env();
+    let guard = ResourceGuard::auto(0.5);
+    let risk = RiskTelemetry::from_guard(&guard);
 
     let result = (|| -> Result<_, String> {
         normalize_path(filepath)?;
@@ -79,6 +97,11 @@ fn sniper_edit(
             ));
         }
 
+        // Context verification: reject if surrounding code has changed
+        if let Some(expected) = context_hash {
+            verify_context(&lines, start, end, expected)?;
+        }
+
         let s = start - 1;
         let removed = if s < lines.len() {
             end.min(lines.len()) - s
@@ -86,11 +109,32 @@ fn sniper_edit(
             0
         };
 
-        let new_lines: Vec<String> = if content.is_empty() {
+        let processed_content = if content.is_empty() {
+            String::new()
+        } else {
+            let mut c = content.to_string();
+            if auto_indent.unwrap_or(false) && needs_indent_fix(&lines, start, end, &c) {
+                c = auto_indent_content(&lines, start, end, &c);
+            }
+            c
+        };
+
+        let new_lines: Vec<String> = if processed_content.is_empty() {
             vec![]
         } else {
-            content.split_inclusive('\n').map(String::from).collect()
+            processed_content
+                .split_inclusive('\n')
+                .map(String::from)
+                .collect()
         };
+
+        // Indentation validation (skip if force_indent or dry_run)
+        if !force_indent.unwrap_or(false) && !dry_run.unwrap_or(false) && !new_lines.is_empty() {
+            let (valid, _, _warning) = validate_indentation(&lines, start, end, &new_lines);
+            if !valid {
+                return Err("indentation validation failed: replacement content indent does not match surrounding context".to_string());
+            }
+        }
 
         let bk = create_backup(filepath)?;
 
@@ -102,10 +146,33 @@ fn sniper_edit(
         }
 
         let refs: Vec<&str> = modified.iter().map(|s| s.as_str()).collect();
-        write_atomic(filepath, &refs)?;
-        let _ = purge_old_backups(filepath, &config);
 
-        Ok((modified.len(), removed, new_lines.len(), bk))
+        if dry_run.unwrap_or(false) {
+            let preview = text
+                .lines()
+                .enumerate()
+                .map(|(i, line)| {
+                    let ln = i + 1;
+                    if ln >= start && ln <= end {
+                        if processed_content.is_empty() {
+                            format!("- {}", line)
+                        } else {
+                            format!("- {}\n+ {}", line, processed_content)
+                        }
+                    } else {
+                        format!("  {}", line)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let _ = preview;
+            Ok((modified.len(), removed, new_lines.len(), bk))
+        } else {
+            write_atomic_with_dal(filepath, &refs, &guard, config.dal_level)?;
+            let _ = purge_old_backups(filepath, &config);
+
+            Ok((modified.len(), removed, new_lines.len(), bk))
+        }
     })();
 
     let dict = PyDict::new(py);
@@ -116,6 +183,19 @@ fn sniper_edit(
             dict.set_item("lines_inserted", inserted)?;
             dict.set_item("total_lines", total)?;
             dict.set_item("backup_path", bk)?;
+
+            let risk_json = serde_json::to_string(&risk).unwrap_or_default();
+            dict.set_item("risk", risk_json)?;
+            dict.set_item("recommended_action", recommend_from_risk(&risk))?;
+
+            let backup_count =
+                count_recent_backups(filepath, config.lock_timeout.as_secs()).unwrap_or(0);
+            if backup_count >= 3 {
+                dict.set_item(
+                    "ai_hint",
+                    "Multiple edits to this file. Consider batching with manifest.",
+                )?;
+            }
         }
         Err(msg) => {
             dict.set_item("status", "error")?;
@@ -127,6 +207,8 @@ fn sniper_edit(
 
 /// Delete lines from a file in the range [start, end).
 ///
+/// Delegates to sniper_edit with an empty content string.
+///
 /// Args:
 ///     filepath (str): Path to the target file.
 ///     start (int): First line to delete (1-based, inclusive).
@@ -137,15 +219,16 @@ fn sniper_edit(
 ///
 /// Raises:
 ///     Same as sniper_edit.
-#[pyfunction]
+#[pyfunction(signature = (filepath, start, end))]
 fn sniper_delete(py: Python<'_>, filepath: &str, start: usize, end: usize) -> PyResult<Py<PyDict>> {
-    sniper_edit(py, filepath, start, end, "")
+    sniper_edit(py, filepath, start, end, "", None, None, None, None)
 }
 
 /// Apply a batch of edit/delete operations from a JSON manifest string.
 ///
 /// Operations are applied bottom-up (by start line, descending) so that
 /// line numbers in earlier operations remain valid after later operations.
+/// Writes are gated by a ResourceGuard and Defense-Ascension Level.
 ///
 /// Args:
 ///     filepath (str): Path to the target file.
@@ -167,11 +250,12 @@ fn sniper_delete(py: Python<'_>, filepath: &str, start: usize, end: usize) -> Py
 ///
 /// Raises:
 ///     ValueError: Invalid JSON, invalid hex, invalid line ranges.
-///     RuntimeError: Lock/backup/write failures.
+///     RuntimeError: Lock/backup/write/resource failures.
 ///     IOError: File read failures.
 #[pyfunction]
 fn sniper_manifest(py: Python<'_>, filepath: &str, operations_json: &str) -> PyResult<Py<PyDict>> {
     let config = SniperConfig::from_env();
+    let guard = ResourceGuard::auto(0.5);
 
     let result = (|| -> Result<_, String> {
         normalize_path(filepath)?;
@@ -181,7 +265,6 @@ fn sniper_manifest(py: Python<'_>, filepath: &str, operations_json: &str) -> PyR
         let mut ops: Vec<ManifestOp> =
             serde_json::from_str(operations_json).map_err(|e| format!("parse JSON: {e}"))?;
 
-        // Pre-validate all hex fields
         for op in &ops {
             if let Some(ref hex) = op.hex {
                 hex_decode(hex)?;
@@ -191,7 +274,6 @@ fn sniper_manifest(py: Python<'_>, filepath: &str, operations_json: &str) -> PyR
         let text = fs::read_to_string(filepath).map_err(|e| format!("read {filepath}: {e}"))?;
         let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
-        // Apply bottom-up so line numbers in earlier ops remain valid
         ops.sort_by_key(|b| std::cmp::Reverse(b.start));
 
         let bk = create_backup(filepath)?;
@@ -224,7 +306,7 @@ fn sniper_manifest(py: Python<'_>, filepath: &str, operations_json: &str) -> PyR
         }
 
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-        write_atomic(filepath, &refs)?;
+        write_atomic_with_dal(filepath, &refs, &guard, config.dal_level)?;
         let _ = purge_old_backups(filepath, &config);
 
         Ok((lines.len(), total_removed, total_inserted, ops.len(), bk))
@@ -247,22 +329,17 @@ fn sniper_manifest(py: Python<'_>, filepath: &str, operations_json: &str) -> PyR
     Ok(dict.into())
 }
 
-/// Restore the most recent backup of a file.
-///
-/// Finds the latest timestamped backup created by a previous edit or manifest
-/// operation and restores it. The consumed backup is removed from the stack
-/// so consecutive undo calls walk backward through the backup history.
+/// Restore the most recent backup for a file.
 ///
 /// Args:
-///     filepath (str): Path to the file to restore.
+///     filepath (str): Path to the target file.
 ///
 /// Returns:
-///     str: Path to the backup file that was restored. Empty string if no
-///         backup exists or on error.
+///     str: Path to the restored backup on success.
 ///
 /// Raises:
-///     RuntimeError: No backup found, lock failure, or restore failure.
-///     IOError: File copy failure.
+///     RuntimeError: No backup found, lock acquisition failure.
+///     IOError: Backup restore failure.
 #[pyfunction]
 fn sniper_undo(filepath: &str) -> PyResult<String> {
     let config = SniperConfig::from_env();
@@ -287,18 +364,11 @@ fn sniper_undo(filepath: &str) -> PyResult<String> {
 
 /// Hex-encode a string.
 ///
-/// Each byte of the input is converted to its two-character hex
-/// representation. The result is safe for shell transmission since it
-/// contains only [0-9a-f] characters.
-///
 /// Args:
-///     text (str): The text to encode.
+///     text (str): Content to encode.
 ///
 /// Returns:
-///     str: Hex-encoded string (lowercase hex digits, no whitespace).
-///
-/// # Examples
-///     sniper_encode("Hello") -> "48656c6c6f"
+///     str: Hex-encoded version of the input.
 #[pyfunction]
 fn sniper_encode(text: &str) -> String {
     text.as_bytes()
@@ -307,32 +377,25 @@ fn sniper_encode(text: &str) -> String {
         .collect()
 }
 
-/// Hex-decode a string back to plain text.
-///
-/// Accepts hex strings with or without whitespace. Rejects odd-length
-/// strings and non-hex characters.
+/// Hex-decode a string.
 ///
 /// Args:
-///     hex_str (str): Hex-encoded string (uppercase or lowercase).
+///     hex_str (str): Hex-encoded string to decode.
 ///
 /// Returns:
-///     str: Decoded plain text.
+///     str: Decoded content.
 ///
 /// Raises:
-///     ValueError: Invalid hex string (odd length, non-hex chars, or
-///         decoded bytes are not valid UTF-8).
-///
-/// # Examples
-///     sniper_decode("48656c6c6f") -> "Hello"
+///     ValueError: Invalid hex input.
 #[pyfunction]
 fn sniper_decode(hex_str: &str) -> PyResult<String> {
     hex_decode(hex_str).map_err(|e| PyValueError::new_err(format!("hex decode: {e}")))
 }
 
-/// Read the entire contents of a file as a string.
+/// Read a file's full contents as a UTF-8 string.
 ///
 /// Args:
-///     filepath (str): Path to the file to read.
+///     filepath (str): Path to the target file.
 ///
 /// Returns:
 ///     str: Full file contents.

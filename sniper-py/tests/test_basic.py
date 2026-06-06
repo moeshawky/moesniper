@@ -7,7 +7,6 @@ DNA:
 """
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -15,8 +14,8 @@ import pytest
 
 @pytest.fixture
 def sniper():
-    """Import the installed sniper package."""
-    import sniper as s
+    """Import the installed moesniper package."""
+    import moesniper as s
 
     return s
 
@@ -127,10 +126,8 @@ class TestEdit:
         result = sniper.edit(path, 1, 1, "modified")
         assert result["status"] == "ok"
         assert "backup_path" in result
-        backup = result["backup_path"]
-        assert os.path.exists(backup) or os.path.exists(
-            os.path.join(os.path.dirname(backup), os.path.basename(backup))
-        )
+        backup = Path(result["backup_path"])
+        assert backup.exists()
 
 
 # ── Delete ────────────────────────────────────────────────────────────────

@@ -4,10 +4,18 @@
 
 /// Configuration types for sniper.
 pub mod config;
+/// Diff generation for dry-run previews.
+pub mod diff;
+/// Indentation validation and auto-fix utilities.
+pub mod indent;
 /// Path security validation and sanitization.
 pub mod security;
 
-/// Defense-Ascension Level controlling resource-check strictness.
+/// Diff-based dry-run preview.
+pub use diff::generate_preview;
+/// Indentation validation and auto-fix.
+pub use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
+
 pub use config::DalLevel;
 /// Main configuration struct for sniper behavior.
 pub use config::SniperConfig;
@@ -85,6 +93,21 @@ impl RiskTelemetry {
                 pressure,
             },
         }
+    }
+}
+/// Recommends an action based on the current resource risk level.
+///
+/// Maps classifier_score thresholds to human-readable recommendations:
+/// - score >= 0.7: "Resource pressure high. Consider pausing."
+/// - score >= 0.4: "Moderate load. Proceed with caution."
+/// - score < 0.4: "Resources nominal."
+pub fn recommend_from_risk(risk: &RiskTelemetry) -> String {
+    if risk.classifier_score >= 0.7 {
+        "Resource pressure high. Consider pausing.".into()
+    } else if risk.classifier_score >= 0.4 {
+        "Moderate load. Proceed with caution.".into()
+    } else {
+        "Resources nominal.".into()
     }
 }
 

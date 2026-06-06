@@ -59,4 +59,9 @@ redundant_else = "warn"
 
 # Allow: pedantic lints that produce false positives for this project
 type_complexity = "allow"
-print_stdout = "allow" # CLI binary — println! is the primary output mechanism
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+opt-level = 3

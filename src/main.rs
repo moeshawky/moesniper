@@ -41,8 +41,8 @@ use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
 
 use moesniper::{
     check_file_size, count_recent_backups, create_backup, find_latest_backup,
-    handle_backtrack_error, hex_decode, normalize_path, purge_old_backups, verify_context,
-    write_atomic_with_dal, RiskTelemetry, SniperConfig, SniperLock,
+    handle_backtrack_error, hex_decode, normalize_path, purge_old_backups, recommend_from_risk,
+    verify_context, write_atomic_with_dal, RiskTelemetry, SniperConfig, SniperLock,
 };
 
 use llmosafe::ResourceGuard;
@@ -701,22 +701,6 @@ fn cmd_undo(filepath: &str) -> CliResult {
 
 fn parse_line(s: &str) -> Result<usize, String> {
     s.parse().map_err(|_| format!("invalid line number: {s}"))
-}
-
-/// Produces a human-readable recommended action from risk telemetry.
-///
-/// Maps classifier_score ranges to specific guidance:
-/// - score >= 0.7: "Resource pressure high. Consider pausing."
-/// - score >= 0.4: "Moderate load. Proceed with caution."
-/// - score < 0.4: "Resources nominal."
-fn recommend_from_risk(risk: &RiskTelemetry) -> String {
-    if risk.classifier_score >= 0.7 {
-        "Resource pressure high. Consider pausing.".into()
-    } else if risk.classifier_score >= 0.4 {
-        "Moderate load. Proceed with caution.".into()
-    } else {
-        "Resources nominal.".into()
-    }
 }
 
 fn err(msg: String) -> CliResult {
