@@ -5,7 +5,28 @@ All notable changes to moesniper will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0.html).
 
-## [Unreleased]
+## [0.7.4] - 2026-06-06
+
+### Added
+- `.agents/` directory to `.gitignore` for agentic dev artifacts
+
+### Changed
+- Version bumped for release
+
+---
+
+## [0.7.3] - 2026-06-04
+
+### Added
+- Python parity bindings and CLI `--version` flag for `moesniper`
+- `*.so` to `.gitignore` to prevent binary wheel commits
+
+### Fixed
+- PyO3 manifest safety parity across all audit findings
+
+---
+
+## [0.7.2] - 2026-06-03
 
 ### Added
 - PID pacing configuration via `SNIPER_PID_BASE_MS`, `SNIPER_PID_ENTROPY_SCALE`, `SNIPER_PID_PRESSURE_SCALE` environment variables
@@ -13,8 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 - Risk telemetry and `recommended_action` now computed for both dry-run and real paths
 
 ### Fixed
-- Eliminated redundant `SniperConfig::from_env()` calls in write path — config now forwarded through call chain (B10/B7 boundary violations resolved)
-- Removed redundant `ResourceGuard::auto(0.5)` in `write_atomic_impl` — caller's guard forwarded instead (B8/B13 boundary violations resolved)
+- Eliminated redundant `SniperConfig::from_env()` calls in write path — config now forwarded through call chain
+- Removed redundant `ResourceGuard::auto(0.5)` in `write_atomic_impl` — caller's guard forwarded instead
 - Help text updated with missing DAL and PID environment variables
 
 ---
@@ -162,6 +183,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 
 | Version | Date | Key Feature |
 |---------|------|-------------|
+| 0.7.4 | 2026-06-06 | Release tooling, .agents/ gitignore |
+| 0.7.3 | 2026-06-04 | Python bindings parity, PyO3 safety |
+| 0.7.2 | 2026-06-03 | PID pacing, config forwarding, risk telemetry |
 | 0.7.1 | 2026-06-01 | Append-at-end fix, manifest bounds, permission preservation, perf optimization |
 | 0.7.0 | 2026-05-30 | Indent engine, PID locks, context verification, docs unification |
 | 0.5.1 | 2026-05-14 | Test suite expansion, help text refactor |
