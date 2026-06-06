@@ -605,7 +605,7 @@ dependencies = [
 
 [[package]]
 name = "moesniper"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "criterion",
  "llmosafe",
@@ -1031,7 +1031,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "sniper-py"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "llmosafe",
  "moesniper",
