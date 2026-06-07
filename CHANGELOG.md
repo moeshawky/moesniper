@@ -5,6 +5,23 @@ All notable changes to moesniper will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **auto-indent double-indentation:** Previously always stripped existing whitespace and applied flat expected indent, destroying multi-level structure and double-indenting already-correct content. Now uses a min-leading guard — content whose minimum indent matches or exceeds the expected level is left unchanged — with an overhang-preserving shift that maintains internal nesting.
+- **manifest splice panic:** Inserting hex content at end-of-file (`start == end == lines.len() + 1`) now uses `.min()` guards on splice ranges with an `extend` fallback, matching the `cmd_splice` insert-at-end pattern. Applied to both CLI `cmd_manifest_impl` and Python bindings.
+- **manifest splice panic on delete-at-end:** Delete path (`op.delete`) now uses `.min(lines.len())` on range end instead of raw `e`.
+- **`needs_indent_fix` false positives:** Simplified to a min-leading check consistent with the auto-indent guard, preventing false positives on already-correct multi-level content.
+- **detect_expected_indent bounds:** Added `.min(all_lines.len())` guard to prevent slice panic on out-of-range line indices.
+
+### Performance
+- **detect_space_step O(N²):** Replaced `Vec::contains` loop body with sort+dedup.
+- **purge_old_backups O(N²):** Replaced `Vec` with `HashSet` for dedup.
+- **hex_encode shared:** Extracted optimized byte-to-hex encoder with pre-allocated buffer and nibble mapping, replacing 3 duplicated inline `format!({:02x})` sites.
+
+### Portability
+- **Test paths:** Replaced hardcoded `"cargo"` and `"/workspace/sniper"` with `env!("CARGO")` / `env!("CARGO_MANIFEST_DIR")` in `tests/enterprise_security.rs`.
+
 ## [0.7.4] - 2026-06-06
 
 ### Added

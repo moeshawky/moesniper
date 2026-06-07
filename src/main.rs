@@ -268,11 +268,7 @@ struct CliResult {
 }
 
 fn cmd_encode(text: &str) -> CliResult {
-    let hex = text
-        .as_bytes()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>();
+    let hex = moesniper::hex_encode(text.as_bytes());
     CliResult {
         status: "encoded".into(),
         message: Some(hex),
@@ -558,18 +554,22 @@ fn cmd_manifest_impl(
         let start = op.start;
         let end = op.end.unwrap_or(op.start);
 
-        if start < 1 || end > lines.len() + 1 || start > end + 1 {
-            return err(format!(
-                "line range {start}-{end} out of bounds (file has {} lines)",
-                lines.len()
-            ));
+        if start < 1 || end > lines.len() || start > end + 1 {
+            if start == lines.len() + 1 && (start == end + 1 || start == end) {
+                // Allow inserting at end
+            } else {
+                return err(format!(
+                    "line range {start}-{end} out of bounds (file has {} lines)",
+                    lines.len()
+                ));
+            }
         }
 
         let s = start - 1;
-        let e = end;
+        let actual_e = end.min(lines.len());
 
         if op.delete.unwrap_or(false) {
-            total_removed += lines.splice(s..e, std::iter::empty()).count();
+            total_removed += lines.splice(s..actual_e, std::iter::empty()).count();
         } else if let Some(ref hex) = op.hex {
             let content = match hex_decode(hex) {
                 Ok(c) => c,
@@ -577,8 +577,8 @@ fn cmd_manifest_impl(
             };
 
             // Apply auto-indent if needed
-            let final_content = if auto_indent && needs_indent_fix(&lines, op.start, e, &content) {
-                auto_indent_content(&lines, op.start, e, &content)
+            let final_content = if auto_indent && needs_indent_fix(&lines, op.start, actual_e, &content) {
+                auto_indent_content(&lines, op.start, actual_e, &content)
             } else {
                 content
             };
@@ -590,7 +590,7 @@ fn cmd_manifest_impl(
                     .map(String::from)
                     .collect();
                 let (valid, warning, _) =
-                    validate_indentation(&lines, op.start, e, &new_lines_for_check);
+                    validate_indentation(&lines, op.start, actual_e, &new_lines_for_check);
                 if !valid && !dry_run {
                     return CliResult {
                         status: "error".into(),
@@ -610,9 +610,13 @@ fn cmd_manifest_impl(
                 .split_inclusive('\n')
                 .map(String::from)
                 .collect();
-            total_removed += e - s;
+            total_removed += actual_e - s;
             total_inserted += new.len();
-            lines.splice(s..e, new);
+            if s < lines.len() {
+                lines.splice(s..actual_e, new);
+            } else {
+                lines.extend(new);
+            }
         }
     }
 
@@ -1106,11 +1110,7 @@ mod tests {
         let mut hasher = sha2::Sha256::new();
         hasher.update(b"a\nb\n");
         hasher.update(b"d\ne\nf\n");
-        let hash: String = hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect();
+        let hash = moesniper::hex_encode(&hasher.finalize());
         let short_hash = &hash[..16];
 
         let r = cmd_splice(&path, 3, 3, "NEW", false, false, false, Some(short_hash));

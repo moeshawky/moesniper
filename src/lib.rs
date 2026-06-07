@@ -28,6 +28,7 @@ pub use config::SniperConfig;
 /// Re-exports for path security validation.
 pub use security::{normalize_path_secure, validate_path, PathSecurityError, SecurityPolicy};
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -174,6 +175,22 @@ impl PidConfig {
     }
 }
 
+/// Hex encode a byte slice.
+///
+/// Uses a pre-allocated buffer with direct byte-to-hex-nibble mapping
+/// for optimal performance (avoids per-character `format!` allocations).
+pub fn hex_encode(data: &[u8]) -> String {
+    let mut buf = Vec::with_capacity(data.len() * 2);
+    for &b in data {
+        buf.push(HEX_CHARS[(b >> 4) as usize]);
+        buf.push(HEX_CHARS[(b & 0x0F) as usize]);
+    }
+    // SAFETY: HEX_CHARS contains only ASCII hex digits, always valid UTF-8
+    unsafe { String::from_utf8_unchecked(buf) }
+}
+
+const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+
 /// Strict hex decoding: skips whitespace, errors on non-hex or odd-length strings.
 pub fn hex_decode(hex: &str) -> Result<String, String> {
     let clean: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
@@ -305,13 +322,13 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
         None
     };
 
-    let mut to_delete = Vec::new();
+    let mut to_delete = HashSet::new();
 
     // Age-based purge
     if let Some(max_age_duration) = max_age {
         for (path, modified) in &backups {
             if now.duration_since(*modified).unwrap_or(Duration::ZERO) > max_age_duration {
-                to_delete.push(path.clone());
+                to_delete.insert(path.clone());
             }
         }
     }
@@ -320,9 +337,7 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
     if config.backup_retention_count > 0 && backups.len() > config.backup_retention_count {
         let to_remove = backups.len() - config.backup_retention_count;
         for (path, _) in backups.iter().take(to_remove) {
-            if !to_delete.contains(path) {
-                to_delete.push(path.clone());
-            }
+            to_delete.insert(path.clone());
         }
     }
 
@@ -544,7 +559,7 @@ pub fn verify_context(
         }
     }
     let hash = hasher.finalize();
-    let actual_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+    let actual_hex = hex_encode(&hash);
     let actual_short = &actual_hex[..16];
 
     if actual_short == expected_hash {
@@ -848,6 +863,13 @@ mod tests {
         );
 
         let _ = fs::remove_file(&file);
+    }
+
+    #[test]
+    fn test_hex_encode() {
+        assert_eq!(hex_encode(b""), "");
+        assert_eq!(hex_encode(b"hello"), "68656c6c6f");
+        assert_eq!(hex_encode(b"\x00\xff"), "00ff");
     }
 
     #[test]

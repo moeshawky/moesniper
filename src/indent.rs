@@ -123,14 +123,14 @@ fn detect_space_step(levels: &[usize]) -> usize {
     sorted_keys.sort_unstable();
     for w in sorted_keys.windows(2) {
         let d = w[1] - w[0];
-        if d > 0 && !candidates.contains(&d) {
+        if d > 0 {
             candidates.push(d);
         }
     }
     // Always include 4 as a fallback candidate
-    if !candidates.contains(&4) {
-        candidates.push(4);
-    }
+    candidates.push(4);
+    candidates.sort_unstable();
+    candidates.dedup();
 
     // Score: raw frequency dominates. On tie, SMALLER step wins
     // (indent step is the base unit, not the deepest nesting level).
@@ -179,7 +179,7 @@ fn detect_expected_indent(
     all_lines: &[String],
     start_line: usize,
 ) -> (IndentStyle, usize) {
-    let idx = start_line.saturating_sub(1);
+    let idx = start_line.saturating_sub(1).min(all_lines.len());
     let window_start = idx.saturating_sub(MAX_SCAN_BACK);
     let window = &all_lines[window_start..idx];
     let style = if window.len() >= 3 {
@@ -389,7 +389,15 @@ pub fn validate_indentation(
 // auto_indent_content
 // ————————————————————————————————————————————————————————————————————————————————
 
-/// Prepends the detected indentation to each non-empty line of content.
+/// Adjusts indentation of content to match the surrounding context.
+///
+/// Finds the minimum leading whitespace in the content, computes the delta to
+/// the expected indent from context, and shifts all content lines by that delta.
+/// This preserves internal indentation structure (multi-level content) while
+/// fixing the base level.
+///
+/// If the content is already at or above the expected indent level (i.e. the
+/// LLM sent correctly indented content), the content is returned unchanged.
 pub fn auto_indent_content(
     all_lines: &[String],
     start_line: usize,
@@ -403,14 +411,32 @@ pub fn auto_indent_content(
         return content.to_string();
     }
 
-    content
-        .lines()
+    let content_lines: Vec<&str> = content.lines().collect();
+    let min_leading = content_lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.chars().take_while(|c| c.is_whitespace()).count())
+        .min()
+        .unwrap_or(0);
+
+    if min_leading >= expected_indent.len() {
+        return content.to_string();
+    }
+
+    content_lines
+        .iter()
         .map(|line| {
             if line.trim().is_empty() {
-                line.to_string()
+                (*line).to_string()
             } else {
-                let stripped = line.trim_start();
-                format!("{}{}", expected_indent, stripped)
+                let leading = line.chars().take_while(|c| c.is_whitespace()).count();
+                let overhang = leading - min_leading;
+                let indent_char = if style.uses_tabs { '\t' } else { ' ' };
+                format!(
+                    "{}{}",
+                    indent_char.to_string().repeat(expected_indent.len() + overhang),
+                    line.trim_start()
+                )
             }
         })
         .collect::<Vec<_>>()
@@ -421,7 +447,7 @@ pub fn auto_indent_content(
 // needs_indent_fix
 // ————————————————————————————————————————————————————————————————————————————————
 
-/// Returns true if any non-empty line has less indentation than expected.
+/// Returns true if the content's minimum indentation is less than expected.
 pub fn needs_indent_fix(
     all_lines: &[String],
     start_line: usize,
@@ -435,17 +461,14 @@ pub fn needs_indent_fix(
         return false;
     }
 
-    let expected_spaces = expected_indent.len();
+    let min_leading = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.chars().take_while(|c| c.is_whitespace()).count())
+        .min()
+        .unwrap_or(0);
 
-    for line in content.lines() {
-        if !line.trim().is_empty() {
-            let leading = line.chars().take_while(|c| c.is_whitespace()).count();
-            if leading < expected_spaces {
-                return true;
-            }
-        }
-    }
-    false
+    min_leading < expected_indent.len()
 }
 
 // ————————————————————————————————————————————————————————————————————————————————
@@ -584,6 +607,29 @@ mod tests {
     fn test_expected_indent_top_of_file() {
         let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
         let (_, level) = detect_expected_indent(&all_lines, 1);
+        assert_eq!(level, 0);
+    }
+
+    #[test]
+    fn test_expected_indent_out_of_bounds() {
+        let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
+        let (_, level) = detect_expected_indent(&all_lines, 10);
+        assert_eq!(level, 1);
+    }
+
+    #[test]
+    fn test_expected_indent_empty_lines() {
+        let all_lines: Vec<String> = vec![];
+        let (style, level) = detect_expected_indent(&all_lines, 1);
+        assert_eq!(level, 0);
+        assert_eq!(style.spaces, 4);
+        assert!(!style.uses_tabs);
+    }
+
+    #[test]
+    fn test_expected_indent_start_line_zero() {
+        let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
+        let (_, level) = detect_expected_indent(&all_lines, 0);
         assert_eq!(level, 0);
     }
 
@@ -735,7 +781,27 @@ mod tests {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "  line1\n    line2\nline3";
         let fixed = auto_indent_content(&all_lines, 2, 2, content);
-        assert_eq!(fixed, "    line1\n    line2\n    line3");
+        // min_leading=0, delta=4. Overhangs preserved: (2-0=2→6), (4-0=4→8), (0-0=0→4)
+        assert_eq!(fixed, "      line1\n        line2\n    line3");
+    }
+
+    #[test]
+    fn test_auto_indent_preserves_multilevel_structure() {
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
+        // Content already has correct base indent with internal nesting — leave it alone
+        let content = "    let x = 1;\n        if true {\n            run();\n        }\n    }";
+        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_auto_indent_shifts_underindented_multilevel() {
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
+        // Content has internal structure but base indent is too shallow (2 spaces vs 4)
+        let content = "  let x = 1;\n      if true {\n          run();\n      }\n  }";
+        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        // Min leading = 2, delta = 2. Every line gets 2 extra spaces.
+        assert_eq!(fixed, "    let x = 1;\n        if true {\n            run();\n        }\n    }");
     }
 
     #[test]
@@ -766,9 +832,12 @@ mod tests {
             .map(|_| "\tfn foo() {".to_string())
             .chain(std::iter::once("\t\tpass".to_string()))
             .collect();
+        // Content already has 4 spaces of indent, expected is 2 tabs (len=2).
+        // Guard: min_leading(4) >= expected_indent.len()(2) → content left unchanged.
+        // Style mismatch is handled by validate_indentation, not auto_indent.
         let content = "    print('hello')";
         let fixed = auto_indent_content(&lines, 31, 31, content);
-        assert_eq!(fixed, "\t\tprint('hello')");
+        assert_eq!(fixed, "    print('hello')");
     }
 
     #[test]

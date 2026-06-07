@@ -330,17 +330,22 @@ fn sniper_manifest(
             let s = op.start;
             let e = op.end.unwrap_or(op.start);
 
-            if s < 1 || e > lines.len() + 1 || s > e + 1 {
-                return Err(format!(
-                    "line range {s}-{e} out of bounds (file has {} lines)",
-                    lines.len()
-                ));
+            if s < 1 || e > lines.len() || s > e + 1 {
+                if s == lines.len() + 1 && (s == e + 1 || s == e) {
+                    // Allow inserting at end
+                } else {
+                    return Err(format!(
+                        "line range {s}-{e} out of bounds (file has {} lines)",
+                        lines.len()
+                    ));
+                }
             }
 
             let range_start = s - 1;
+            let actual_e = e.min(lines.len());
 
             if op.delete.unwrap_or(false) {
-                let removed = lines.splice(range_start..e, std::iter::empty()).count();
+                let removed = lines.splice(range_start..actual_e, std::iter::empty()).count();
                 total_removed += removed;
             } else if let Some(ref hex) = op.hex {
                 let decoded = hex_decode(hex)?;
@@ -348,9 +353,9 @@ fn sniper_manifest(
                 // Apply auto-indent if needed (mirrors CLI cmd_manifest_impl)
                 let final_content =
                     if auto_indent.unwrap_or(false)
-                        && needs_indent_fix(&lines, op.start, e, &decoded)
+                        && needs_indent_fix(&lines, op.start, actual_e, &decoded)
                     {
-                        auto_indent_content(&lines, op.start, e, &decoded)
+                        auto_indent_content(&lines, op.start, actual_e, &decoded)
                     } else {
                         decoded
                     };
@@ -362,7 +367,7 @@ fn sniper_manifest(
                         .map(String::from)
                         .collect();
                     let (valid, warning, _) =
-                        validate_indentation(&lines, op.start, e, &new_lines_for_check);
+                        validate_indentation(&lines, op.start, actual_e, &new_lines_for_check);
                     if !valid {
                         return Err(format!(
                             "indentation validation failed at line {}: {}",
@@ -374,7 +379,12 @@ fn sniper_manifest(
 
                 let new: Vec<String> =
                     final_content.split_inclusive('\n').map(String::from).collect();
-                let removed = lines.splice(range_start..e, new.clone()).count();
+                let removed = if range_start < lines.len() {
+                    lines.splice(range_start..actual_e, new.clone()).count()
+                } else {
+                    lines.extend(new.clone());
+                    0
+                };
                 total_removed += removed;
                 total_inserted += new.len();
             }
