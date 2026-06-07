@@ -32,6 +32,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::thread;
+use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 
 use llmosafe::ResourceGuard;
@@ -305,13 +306,13 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
         None
     };
 
-    let mut to_delete = Vec::new();
+    let mut to_delete = HashSet::new();
 
     // Age-based purge
     if let Some(max_age_duration) = max_age {
         for (path, modified) in &backups {
             if now.duration_since(*modified).unwrap_or(Duration::ZERO) > max_age_duration {
-                to_delete.push(path.clone());
+                to_delete.insert(path.clone());
             }
         }
     }
@@ -320,9 +321,7 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
     if config.backup_retention_count > 0 && backups.len() > config.backup_retention_count {
         let to_remove = backups.len() - config.backup_retention_count;
         for (path, _) in backups.iter().take(to_remove) {
-            if !to_delete.contains(path) {
-                to_delete.push(path.clone());
-            }
+            to_delete.insert(path.clone());
         }
     }
 
