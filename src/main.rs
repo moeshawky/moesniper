@@ -268,11 +268,7 @@ struct CliResult {
 }
 
 fn cmd_encode(text: &str) -> CliResult {
-    let hex = text
-        .as_bytes()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>();
+    let hex = moesniper::hex_encode(text.as_bytes());
     CliResult {
         status: "encoded".into(),
         message: Some(hex),
@@ -1106,11 +1102,7 @@ mod tests {
         let mut hasher = sha2::Sha256::new();
         hasher.update(b"a\nb\n");
         hasher.update(b"d\ne\nf\n");
-        let hash: String = hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect();
+        let hash = moesniper::hex_encode(&hasher.finalize());
         let short_hash = &hash[..16];
 
         let r = cmd_splice(&path, 3, 3, "NEW", false, false, false, Some(short_hash));

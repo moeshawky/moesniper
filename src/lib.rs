@@ -174,6 +174,11 @@ impl PidConfig {
     }
 }
 
+/// Hex encode a byte slice.
+pub fn hex_encode(data: &[u8]) -> String {
+    data.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
 /// Strict hex decoding: skips whitespace, errors on non-hex or odd-length strings.
 pub fn hex_decode(hex: &str) -> Result<String, String> {
     let clean: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
@@ -544,7 +549,7 @@ pub fn verify_context(
         }
     }
     let hash = hasher.finalize();
-    let actual_hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+    let actual_hex = hex_encode(&hash);
     let actual_short = &actual_hex[..16];
 
     if actual_short == expected_hash {
