@@ -268,11 +268,15 @@ struct CliResult {
 }
 
 fn cmd_encode(text: &str) -> CliResult {
-    let hex = text
-        .as_bytes()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>();
+    const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+    let bytes = text.as_bytes();
+    let mut hex_bytes = vec![0u8; bytes.len() * 2];
+    for (i, &b) in bytes.iter().enumerate() {
+        hex_bytes[i * 2] = HEX_CHARS[(b >> 4) as usize];
+        hex_bytes[i * 2 + 1] = HEX_CHARS[(b & 0x0F) as usize];
+    }
+    let hex = unsafe { String::from_utf8_unchecked(hex_bytes) };
+
     CliResult {
         status: "encoded".into(),
         message: Some(hex),
