@@ -747,6 +747,37 @@ mod tests {
     }
 
     #[test]
+    fn test_auto_indent_empty_expected_indent() {
+        // This tests the early return when expected_indent is empty (e.g., top-level)
+        let all_lines = vec!["line1\n".to_string(), "line2\n".to_string()];
+        let content = "line3";
+        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        assert_eq!(fixed, "line3");
+    }
+
+    #[test]
+    fn test_auto_indent_basic_functionality() {
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
+        let content = "print('hello')\n    print('world')";
+        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        assert_eq!(fixed, "    print('hello')\n    print('world')");
+    }
+
+    #[test]
+    fn test_auto_indent_empty_content() {
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
+        let fixed = auto_indent_content(&all_lines, 2, 2, "");
+        assert_eq!(fixed, "");
+    }
+
+    #[test]
+    fn test_auto_indent_whitespace_only_content() {
+        let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
+        let fixed = auto_indent_content(&all_lines, 2, 2, "   \n\t\n  ");
+        assert_eq!(fixed, "   \n\t\n  ");
+    }
+
+    #[test]
     fn test_auto_indent_with_tabs() {
         // File with tab-indented functions. Line 31 (last line) is "\t\tpass"
         // which is inside a `{` block from line 30 → expected level is 2.
