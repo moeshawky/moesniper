@@ -293,9 +293,9 @@ mod documentation_tests {
     fn test_line_number_documentation() {
         use std::process::Command;
 
-        let output = Command::new("cargo")
+        let output = Command::new(env!("CARGO"))
             .args(["run", "--quiet", "--", "--help"])
-            .current_dir("/workspace/sniper")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output()
             .unwrap();
 
@@ -397,7 +397,7 @@ mod compound_security_tests {
         fs::write(&file_path, "content\n").unwrap();
 
         // First edit: acquires lock, succeeds
-        let output = Command::new("cargo")
+        let output = Command::new(env!("CARGO"))
             .args([
                 "run",
                 "--quiet",
@@ -417,7 +417,7 @@ mod compound_security_tests {
         );
 
         // Cleanup — the lock should be released already (process exited)
-        let output = Command::new("cargo")
+        let output = Command::new(env!("CARGO"))
             .args([
                 "run",
                 "--quiet",
