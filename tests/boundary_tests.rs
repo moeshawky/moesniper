@@ -15,6 +15,10 @@ use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
 
+fn read_file(path: impl AsRef<std::path::Path>) -> String {
+    std::fs::read_to_string(path).unwrap()
+}
+
 // =========================================================================
 // PID-based lock file verification
 // =========================================================================
@@ -46,7 +50,7 @@ fn test_lock_file_contains_pid() {
         lock_path
     );
 
-    let content = fs::read_to_string(&lock_path).unwrap();
+    let content = read_file(&lock_path);
     let pid: u32 = content.trim().parse().unwrap();
     assert_eq!(
         pid,
@@ -156,7 +160,7 @@ fn test_temp_file_name_contains_timestamp() {
     for i in 0..20 {
         fs::write(&file, format!("v{}\n", i)).unwrap();
         write_atomic(file.to_str().unwrap(), &[&format!("v{}", i + 1)]).unwrap();
-        let content = fs::read_to_string(&file).unwrap();
+        let content = read_file(&file);
         assert_eq!(content, format!("v{}\n", i + 1), "Write {} must succeed", i);
     }
 }
@@ -434,7 +438,7 @@ fn test_manifest_empty_operations_list() {
         stderr
     );
     // File should be unchanged
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     assert_eq!(content, "original\n", "Empty manifest must not modify file");
 }
 
@@ -496,7 +500,7 @@ fn test_manifest_bad_hex_rejected_before_backup() {
         0
     };
     // Note: cleanup from other tests may run concurrently, so we check the file is unmodified
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     assert_eq!(
         content, "original\n",
         "File must be unmodified after manifest failure"
@@ -611,7 +615,7 @@ fn test_write_atomic_preserves_trailing_newline() {
     // File WITH trailing newline
     fs::write(&file, "original\n").unwrap();
     write_atomic(file.to_str().unwrap(), &["modified"]).unwrap();
-    let content = fs::read_to_string(&file).unwrap();
+    let content = read_file(&file);
     assert_eq!(content, "modified\n", "Must preserve trailing newline");
 }
 
@@ -623,7 +627,7 @@ fn test_write_atomic_preserves_missing_trailing_newline() {
     // File WITHOUT trailing newline
     fs::write(&file, "original").unwrap();
     write_atomic(file.to_str().unwrap(), &["modified"]).unwrap();
-    let content = fs::read_to_string(&file).unwrap();
+    let content = read_file(&file);
     assert_eq!(
         content, "modified",
         "Must preserve missing trailing newline, got: {:?}",
@@ -639,7 +643,7 @@ fn test_write_atomic_multiline_preserves_trailing_newline() {
     // Multiple lines with trailing newline
     fs::write(&file, "line1\nline2\n").unwrap();
     write_atomic(file.to_str().unwrap(), &["a", "b", "c"]).unwrap();
-    let content = fs::read_to_string(&file).unwrap();
+    let content = read_file(&file);
     assert_eq!(
         content, "a\nb\nc\n",
         "Multi-line must preserve trailing newline"
@@ -653,7 +657,7 @@ fn test_write_atomic_multiline_no_trailing_newline() {
 
     fs::write(&file, "line1\nline2").unwrap();
     write_atomic(file.to_str().unwrap(), &["a", "b", "c"]).unwrap();
-    let content = fs::read_to_string(&file).unwrap();
+    let content = read_file(&file);
     assert_eq!(
         content, "a\nb\nc",
         "Multi-line must preserve missing trailing newline, got: {:?}",
@@ -668,7 +672,7 @@ fn test_write_atomic_empty_file() {
 
     fs::write(&file, "").unwrap();
     write_atomic(file.to_str().unwrap(), &["hello"]).unwrap();
-    let content = fs::read_to_string(&file).unwrap();
+    let content = read_file(&file);
     assert_eq!(
         content, "hello",
         "Writing to empty file must produce single line without trailing newline"

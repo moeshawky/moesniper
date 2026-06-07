@@ -175,10 +175,7 @@ const MAX_SCAN_BACK: usize = 20;
 ///
 /// Handles: `{` (+1 level), `}` (−1 level for content after), `:` (+1),
 /// `(` and `[` (continuation: +1 level for next line).
-fn detect_expected_indent(
-    all_lines: &[String],
-    start_line: usize,
-) -> (IndentStyle, usize) {
+fn detect_expected_indent(all_lines: &[String], start_line: usize) -> (IndentStyle, usize) {
     let idx = start_line.saturating_sub(1).min(all_lines.len());
     let window_start = idx.saturating_sub(MAX_SCAN_BACK);
     let window = &all_lines[window_start..idx];
@@ -434,7 +431,9 @@ pub fn auto_indent_content(
                 let indent_char = if style.uses_tabs { '\t' } else { ' ' };
                 format!(
                     "{}{}",
-                    indent_char.to_string().repeat(expected_indent.len() + overhang),
+                    indent_char
+                        .to_string()
+                        .repeat(expected_indent.len() + overhang),
                     line.trim_start()
                 )
             }
@@ -801,7 +800,10 @@ mod tests {
         let content = "  let x = 1;\n      if true {\n          run();\n      }\n  }";
         let fixed = auto_indent_content(&all_lines, 2, 2, content);
         // Min leading = 2, delta = 2. Every line gets 2 extra spaces.
-        assert_eq!(fixed, "    let x = 1;\n        if true {\n            run();\n        }\n    }");
+        assert_eq!(
+            fixed,
+            "    let x = 1;\n        if true {\n            run();\n        }\n    }"
+        );
     }
 
     #[test]
