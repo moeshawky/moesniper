@@ -108,10 +108,10 @@ fn run(args: Vec<String>) -> std::process::ExitCode {
         ["encode", text] => cmd_encode(text),
         [file, "--undo"] => cmd_undo(file),
         [file, "--manifest"] if use_stdin => {
-            cmd_manifest_stdin(file, dry_run, auto_indent, force_indent)
+            cmd_manifest(file, None, dry_run, auto_indent, force_indent)
         }
         [file, "--manifest", manifest] => {
-            cmd_manifest(file, manifest, dry_run, auto_indent, force_indent)
+            cmd_manifest(file, Some(manifest), dry_run, auto_indent, force_indent)
         }
         [file, start, end, "--delete"] => {
             if use_stdin {
@@ -473,30 +473,25 @@ fn cmd_splice(
     }
 }
 
-fn cmd_manifest_stdin(
-    filepath: &str,
-    dry_run: bool,
-    auto_indent: bool,
-    force_indent: bool,
-) -> CliResult {
-    let mut buffer = String::new();
-    let manifest = match std::io::stdin().read_to_string(&mut buffer) {
-        Ok(_) => buffer,
-        Err(e) => return err(format!("read manifest from stdin: {e}")),
-    };
-    cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, force_indent)
-}
-
 fn cmd_manifest(
     filepath: &str,
-    manifest_path: &str,
+    manifest_path: Option<&str>,
     dry_run: bool,
     auto_indent: bool,
     force_indent: bool,
 ) -> CliResult {
-    let manifest = match fs::read_to_string(manifest_path) {
-        Ok(m) => m,
-        Err(e) => return err(format!("read manifest: {e}")),
+    let manifest = match manifest_path {
+        Some(path) => match fs::read_to_string(path) {
+            Ok(m) => m,
+            Err(e) => return err(format!("read manifest: {e}")),
+        },
+        None => {
+            let mut buffer = String::new();
+            match std::io::stdin().read_to_string(&mut buffer) {
+                Ok(_) => buffer,
+                Err(e) => return err(format!("read manifest from stdin: {e}")),
+            }
+        }
     };
     cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, force_indent)
 }
@@ -765,6 +760,10 @@ mod tests {
         path.to_str().unwrap().to_string()
     }
 
+    fn read_file(path: impl AsRef<std::path::Path>) -> String {
+        fs::read_to_string(path).unwrap()
+    }
+
     // --- hex_decode tests ---
 
     #[test]
@@ -808,7 +807,7 @@ mod tests {
         assert_eq!(r.status, "ok");
         assert_eq!(r.lines_removed, 1);
         assert_eq!(r.lines_inserted, 1);
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "line1\nhex\nline3\n");
     }
 
@@ -818,7 +817,7 @@ mod tests {
         let path = create_file(&dir, "test.txt", "line1\nline2");
         let r = cmd_splice(&path, 2, 2, "new", false, false, false, None);
         assert_eq!(r.status, "ok");
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "line1\nnew");
         assert!(!content.ends_with('\n'));
     }
@@ -829,7 +828,7 @@ mod tests {
         let path = create_file(&dir, "test.txt", "line1\nline2\n");
         let r = cmd_splice(&path, 2, 2, "new", false, false, false, None);
         assert_eq!(r.status, "ok");
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "line1\nnew\n");
         assert!(content.ends_with('\n'));
     }
@@ -842,7 +841,7 @@ mod tests {
         assert_eq!(r.status, "ok");
         assert_eq!(r.lines_removed, 3);
         assert_eq!(r.lines_inserted, 2);
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "a\nX\nY\ne\n");
     }
 
@@ -852,7 +851,7 @@ mod tests {
         let path = create_file(&dir, "test.txt", "a\nb\n");
         let r = cmd_splice(&path, 2, 2, "c", false, false, false, None);
         assert_eq!(r.status, "ok");
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "a\nc\n");
     }
 
@@ -862,7 +861,7 @@ mod tests {
         let path = create_file(&dir, "test.txt", "a\nb\n");
         let r = cmd_splice(&path, 3, 2, "c", false, false, false, None);
         assert_eq!(r.status, "ok");
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "a\nb\nc\n");
     }
 
@@ -872,7 +871,7 @@ mod tests {
         let path = create_file(&dir, "test.txt", "a\nb\n");
         let r = cmd_splice(&path, 3, 3, "c", false, false, false, None);
         assert_eq!(r.status, "ok");
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "a\nb\nc\n");
     }
 
@@ -903,7 +902,7 @@ mod tests {
         assert_eq!(r.status, "ok");
         assert_eq!(r.lines_removed, 1);
         assert_eq!(r.lines_inserted, 0);
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "a\nc\n");
     }
 
@@ -915,7 +914,7 @@ mod tests {
         assert_eq!(r.status, "ok");
         assert_eq!(r.lines_removed, 3);
         assert_eq!(r.lines_inserted, 0);
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "a\ne\n");
     }
 
@@ -925,10 +924,10 @@ mod tests {
     fn test_cmd_splice_dry_run_no_change() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\nc\n");
-        let original = fs::read_to_string(&path).unwrap();
+        let original = read_file(&path);
         let r = cmd_splice(&path, 2, 2, "7878", true, false, false, None);
         assert_eq!(r.status, "dry_run");
-        let after = fs::read_to_string(&path).unwrap();
+        let after = read_file(&path);
         assert_eq!(original, after);
     }
 
@@ -936,10 +935,10 @@ mod tests {
     fn test_cmd_splice_dry_run_delete() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\nc\n");
-        let original = fs::read_to_string(&path).unwrap();
+        let original = read_file(&path);
         let r = cmd_splice(&path, 1, 2, "", true, false, false, None);
         assert_eq!(r.status, "dry_run");
-        let after = fs::read_to_string(&path).unwrap();
+        let after = read_file(&path);
         assert_eq!(original, after);
     }
 
@@ -952,10 +951,10 @@ mod tests {
         let manifest =
             r#"[{"start": 1, "end": 1, "hex": "78"}, {"start": 3, "end": 4, "delete": true}]"#;
         let manifest_path = create_file(&dir, "ops.json", manifest);
-        let r = cmd_manifest(&path, &manifest_path, false, false, false);
+        let r = cmd_manifest(&path, Some(&manifest_path), false, false, false);
         assert_eq!(r.status, "ok");
         assert_eq!(r.operations, Some(2));
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "x\nline2\nline5\n");
     }
 
@@ -963,12 +962,12 @@ mod tests {
     fn test_cmd_manifest_dry_run() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\nc\n");
-        let original = fs::read_to_string(&path).unwrap();
+        let original = read_file(&path);
         let manifest = r#"[{"start": 1, "end": 1, "hex": "78"}]"#;
         let manifest_path = create_file(&dir, "ops.json", manifest);
-        let r = cmd_manifest(&path, &manifest_path, true, false, false);
+        let r = cmd_manifest(&path, Some(&manifest_path), true, false, false);
         assert_eq!(r.status, "dry_run");
-        let after = fs::read_to_string(&path).unwrap();
+        let after = read_file(&path);
         assert_eq!(original, after);
     }
 
@@ -977,7 +976,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\n");
         let manifest_path = create_file(&dir, "ops.json", "not json");
-        let r = cmd_manifest(&path, &manifest_path, false, false, false);
+        let r = cmd_manifest(&path, Some(&manifest_path), false, false, false);
         assert_eq!(r.status, "error");
         assert!(r.message.as_deref().unwrap().contains("parse manifest"));
     }
@@ -991,7 +990,7 @@ mod tests {
             "ops.json",
             r#"[{"start": 10, "end": 15, "delete": true}]"#,
         );
-        let r = cmd_manifest(&path, &manifest_path, false, false, false);
+        let r = cmd_manifest(&path, Some(&manifest_path), false, false, false);
         assert_eq!(r.status, "error");
         assert!(r.message.as_deref().unwrap().contains("out of bounds"));
     }
@@ -1012,11 +1011,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "undo_restores_unique_67890.txt", "original\n");
         let _ = cmd_splice(&path, 1, 1, "xx", false, false, false, None);
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_ne!(content, "original\n");
         let r = cmd_undo(&path);
         assert_eq!(r.status, "restored");
-        let restored = fs::read_to_string(&path).unwrap();
+        let restored = read_file(&path);
         assert_eq!(restored, "original\n");
     }
 
@@ -1028,13 +1027,13 @@ mod tests {
         cmd_splice(&path, 1, 1, "v2", false, false, false, None); // edit 1
         cmd_splice(&path, 1, 1, "v3", false, false, false, None); // edit 2
 
-        assert_eq!(fs::read_to_string(&path).unwrap(), "v3\n");
+        assert_eq!(read_file(&path), "v3\n");
 
         cmd_undo(&path); // undo 1
-        assert_eq!(fs::read_to_string(&path).unwrap(), "v2\n");
+        assert_eq!(read_file(&path), "v2\n");
 
         cmd_undo(&path); // undo 2
-        assert_eq!(fs::read_to_string(&path).unwrap(), "v1\n");
+        assert_eq!(read_file(&path), "v1\n");
 
         let r = cmd_undo(&path); // undo 3 (fail)
         assert_eq!(r.status, "error");
@@ -1112,7 +1111,7 @@ mod tests {
     fn test_context_verification_match() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "ctx_test.txt", "a\nb\nc\nd\ne\nf\ng\nh\n");
-        let original = fs::read_to_string(&path).unwrap();
+        let original = read_file(&path);
         let _lines: Vec<String> = original.split_inclusive('\n').map(String::from).collect();
 
         let mut hasher = sha2::Sha256::new();
@@ -1224,7 +1223,7 @@ mod tests {
         let r = cmd_splice(&path, 2, 2, "", false, false, false, None);
         assert_eq!(r.status, "ok");
 
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         // After PR #8: trailing newlines are stripped uniformly, then re-added based on original file.
         // Original had no trailing newline, so result should be "a" (no trailing newline).
         // Let's see what it is currently.
@@ -1237,7 +1236,7 @@ mod tests {
         let path = create_file(&dir, "one.txt", "only\n");
         let r = cmd_splice(&path, 1, 1, "new", false, false, false, None);
         assert_eq!(r.status, "ok");
-        let content = fs::read_to_string(&path).unwrap();
+        let content = read_file(&path);
         assert_eq!(content, "new\n");
     }
 
@@ -1254,13 +1253,13 @@ mod tests {
         ) {
             let dir = TempDir::new().unwrap();
             let path = create_file(&dir, "prop_test.txt", &content);
-            let original = fs::read_to_string(&path).unwrap();
+            let original = read_file(&path);
             let lines: Vec<&str> = original.lines().collect();
             if lines.is_empty() || line_num > lines.len() {
                 return Ok(());
             }
             let _ = cmd_splice(&path, line_num, line_num, &replacement, true, false, false, None);
-            let after = fs::read_to_string(&path).unwrap();
+            let after = read_file(&path);
             prop_assert_eq!(original, after);
         }
 
@@ -1278,7 +1277,7 @@ mod tests {
                 return Ok(());
             }
             let _ = cmd_splice(&path, start, end, &replacement, false, false, false, None);
-            let after = fs::read_to_string(&path).unwrap();
+            let after = read_file(&path);
             let lines_after: Vec<&str> = after.lines().collect();
             // Lines before start should be preserved
             for i in 0..(start - 1).min(lines_before.len()) {
@@ -1307,14 +1306,14 @@ mod tests {
         ) {
             let dir = TempDir::new().unwrap();
             let path = create_file(&dir, "prop_undo_test.txt", &content);
-            let original = fs::read_to_string(&path).unwrap();
+            let original = read_file(&path);
             let lines: Vec<&str> = original.lines().collect();
             if lines.is_empty() || line_num > lines.len() {
                 return Ok(());
             }
             let _ = cmd_splice(&path, line_num, line_num, &replacement, false, false, false, None);
             let _ = cmd_undo(&path);
-            let restored = fs::read_to_string(&path).unwrap();
+            let restored = read_file(&path);
             prop_assert_eq!(original, restored);
         }
 
@@ -1330,7 +1329,7 @@ mod tests {
                 return Ok(());
             }
             let r = cmd_splice(&path, 1, 2, &replacement, false, false, false, None);
-            let after = fs::read_to_string(&path).unwrap();
+            let after = read_file(&path);
             let lines_after: Vec<&str> = after.lines().collect();
             // total_lines in result should match actual line count
             prop_assert_eq!(r.total_lines, Some(lines_after.len()));

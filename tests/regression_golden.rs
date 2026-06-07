@@ -16,6 +16,10 @@ fn normalize(s: &str) -> String {
     s.replace("\r\n", "\n").replace('\r', "\n")
 }
 
+fn read_file(path: impl AsRef<std::path::Path>) -> String {
+    std::fs::read_to_string(path).unwrap()
+}
+
 // Undo stack behavior matches golden file
 #[test]
 fn test_golden_undo_stack() {
@@ -33,7 +37,7 @@ fn test_golden_undo_stack() {
         assert!(status.success());
     }
 
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     let golden = normalize(include_str!("regression/golden/undo_stack.txt"));
 
     assert_eq!(
@@ -57,7 +61,7 @@ fn test_golden_splice_basic() {
 
     assert!(status.success());
 
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     let golden = include_str!("regression/golden/splice_basic.txt");
 
     assert_eq!(
@@ -82,7 +86,7 @@ fn test_golden_newline_preservation() {
         .unwrap();
 
     assert!(status.success(), "Splice must succeed on valid input");
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     assert!(
         content.ends_with('\n'),
         "Must preserve trailing newline, got: {:?}",
@@ -116,7 +120,7 @@ fn test_golden_manifest_basic() {
     // Should succeed
     assert!(status.success(), "Manifest operation should succeed");
 
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     // After deleting line 2 from "line1\nline2\nline3\n", result must be exact
     assert_eq!(
         content, "line1\nline3\n",
@@ -142,7 +146,7 @@ fn test_golden_splice_append_at_end_two_line_file() {
         "start=3,end=3 on a 2-line file must append"
     );
 
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     assert_eq!(
         normalize(&content),
         normalize("a\nb\nc\n"),
@@ -168,7 +172,7 @@ fn test_golden_splice_append_at_end_one_line_file() {
         "start=2,end=2 on a 1-line file must append"
     );
 
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     assert_eq!(
         normalize(&content),
         normalize("x\ny\n"),
@@ -194,7 +198,7 @@ fn test_golden_splice_append_at_end_four_line_file() {
         "start=5,end=5 on a 4-line file must append"
     );
 
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     assert_eq!(
         normalize(&content),
         normalize("a\nb\nc\nd\ne\n"),
@@ -220,7 +224,7 @@ fn test_golden_splice_insert_at_end_start_gt_end() {
         "start=3,end=2 on a 2-line file must append"
     );
 
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     assert_eq!(
         normalize(&content),
         normalize("a\nb\nc\n"),
@@ -246,7 +250,7 @@ fn test_golden_splice_append_at_end_empty_content() {
         "start=3,end=3 with empty content on 2-line file must succeed"
     );
 
-    let content = fs::read_to_string(&file_path).unwrap();
+    let content = read_file(&file_path);
     // Delete at end position with nothing to delete → file unchanged
     assert_eq!(
         normalize(&content),
