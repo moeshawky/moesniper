@@ -295,7 +295,7 @@ mod documentation_tests {
 
         let output = Command::new("cargo")
             .args(["run", "--quiet", "--", "--help"])
-            .current_dir("/workspace/sniper")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
             .output()
             .unwrap();
 
