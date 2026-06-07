@@ -123,14 +123,14 @@ fn detect_space_step(levels: &[usize]) -> usize {
     sorted_keys.sort_unstable();
     for w in sorted_keys.windows(2) {
         let d = w[1] - w[0];
-        if d > 0 && !candidates.contains(&d) {
+        if d > 0 {
             candidates.push(d);
         }
     }
     // Always include 4 as a fallback candidate
-    if !candidates.contains(&4) {
-        candidates.push(4);
-    }
+    candidates.push(4);
+    candidates.sort_unstable();
+    candidates.dedup();
 
     // Score: raw frequency dominates. On tie, SMALLER step wins
     // (indent step is the base unit, not the deepest nesting level).
