@@ -111,21 +111,17 @@ fn clean_path(path: &Path) -> PathBuf {
     let mut components: Vec<Component> = Vec::new();
 
     for component in path.components() {
-        match component {
-            Component::CurDir => {
-                continue;
-            }
-            Component::ParentDir => {
-                if let Some(Component::Normal(_)) = components.last() {
-                    components.pop();
-                } else if components.is_empty() {
-                    // Leading .. - keep it for absolute paths
-                    components.push(component);
-                }
-            }
-            other => {
-                components.push(other);
-            }
+        if component == Component::CurDir { continue; }
+        if component != Component::ParentDir {
+            components.push(component);
+            continue;
+        }
+
+        if let Some(Component::Normal(_)) = components.last() {
+            components.pop();
+        } else if components.is_empty() {
+            // Leading .. - keep it for absolute paths
+            components.push(component);
         }
     }
 
