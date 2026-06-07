@@ -179,7 +179,7 @@ fn detect_expected_indent(
     all_lines: &[String],
     start_line: usize,
 ) -> (IndentStyle, usize) {
-    let idx = start_line.saturating_sub(1);
+    let idx = start_line.saturating_sub(1).min(all_lines.len());
     let window_start = idx.saturating_sub(MAX_SCAN_BACK);
     let window = &all_lines[window_start..idx];
     let style = if window.len() >= 3 {
@@ -584,6 +584,34 @@ mod tests {
     fn test_expected_indent_top_of_file() {
         let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
         let (_, level) = detect_expected_indent(&all_lines, 1);
+        assert_eq!(level, 0);
+    }
+
+    #[test]
+    fn test_expected_indent_out_of_bounds() {
+        let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
+        // `start_line` is much greater than `all_lines.len()`
+        let (_, level) = detect_expected_indent(&all_lines, 10);
+        // It shouldn't panic, but should safely fall back to the available context or default.
+        // Since the last available context line is "    let x = 1;\n" (level 1 indent),
+        // we expect level 1.
+        assert_eq!(level, 1);
+    }
+
+    #[test]
+    fn test_expected_indent_empty_lines() {
+        let all_lines: Vec<String> = vec![];
+        let (style, level) = detect_expected_indent(&all_lines, 1);
+        assert_eq!(level, 0);
+        assert_eq!(style.spaces, 4); // default
+        assert!(!style.uses_tabs);
+    }
+
+    #[test]
+    fn test_expected_indent_start_line_zero() {
+        let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
+        // start_line == 0
+        let (_, level) = detect_expected_indent(&all_lines, 0);
         assert_eq!(level, 0);
     }
 
