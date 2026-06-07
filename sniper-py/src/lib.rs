@@ -311,9 +311,7 @@ fn sniper_manifest(
             }
         }
 
-        let text =
-            fs::read_to_string(filepath)
-                .map_err(|e| handle_backtrack_error(e, "Read"))?;
+        let text = fs::read_to_string(filepath).map_err(|e| handle_backtrack_error(e, "Read"))?;
         let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
         ops.sort_by_key(|b| std::cmp::Reverse(b.start));
@@ -345,20 +343,21 @@ fn sniper_manifest(
             let actual_e = e.min(lines.len());
 
             if op.delete.unwrap_or(false) {
-                let removed = lines.splice(range_start..actual_e, std::iter::empty()).count();
+                let removed = lines
+                    .splice(range_start..actual_e, std::iter::empty())
+                    .count();
                 total_removed += removed;
             } else if let Some(ref hex) = op.hex {
                 let decoded = hex_decode(hex)?;
 
                 // Apply auto-indent if needed (mirrors CLI cmd_manifest_impl)
-                let final_content =
-                    if auto_indent.unwrap_or(false)
-                        && needs_indent_fix(&lines, op.start, actual_e, &decoded)
-                    {
-                        auto_indent_content(&lines, op.start, actual_e, &decoded)
-                    } else {
-                        decoded
-                    };
+                let final_content = if auto_indent.unwrap_or(false)
+                    && needs_indent_fix(&lines, op.start, actual_e, &decoded)
+                {
+                    auto_indent_content(&lines, op.start, actual_e, &decoded)
+                } else {
+                    decoded
+                };
 
                 // Validate indentation (skip if force_indent or dry_run)
                 if !force_indent.unwrap_or(false) && !dry_run.unwrap_or(false) {
@@ -377,8 +376,10 @@ fn sniper_manifest(
                     }
                 }
 
-                let new: Vec<String> =
-                    final_content.split_inclusive('\n').map(String::from).collect();
+                let new: Vec<String> = final_content
+                    .split_inclusive('\n')
+                    .map(String::from)
+                    .collect();
                 let removed = if range_start < lines.len() {
                     lines.splice(range_start..actual_e, new.clone()).count()
                 } else {
@@ -576,7 +577,13 @@ fn version_py(py: Python<'_>) -> PyResult<Py<PyDict>> {
 /// Raises:
 ///     IOError: File not found or read error.
 #[pyfunction]
-fn validate_indentation_py(py: Python<'_>, filepath: &str, start: usize, end: usize, content: &str) -> PyResult<Py<PyDict>> {
+fn validate_indentation_py(
+    py: Python<'_>,
+    filepath: &str,
+    start: usize,
+    end: usize,
+    content: &str,
+) -> PyResult<Py<PyDict>> {
     let lines: Vec<String> = fs::read_to_string(filepath)
         .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
         .lines()
@@ -606,7 +613,12 @@ fn validate_indentation_py(py: Python<'_>, filepath: &str, start: usize, end: us
 /// Raises:
 ///     IOError: File not found or read error.
 #[pyfunction]
-fn auto_indent_content_py(filepath: &str, start: usize, end: usize, content: &str) -> PyResult<String> {
+fn auto_indent_content_py(
+    filepath: &str,
+    start: usize,
+    end: usize,
+    content: &str,
+) -> PyResult<String> {
     let lines: Vec<String> = fs::read_to_string(filepath)
         .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
         .lines()
@@ -636,7 +648,7 @@ fn needs_indent_fix_py(filepath: &str, start: usize, end: usize, content: &str) 
         .lines()
         .map(|s| s.to_string())
         .collect();
-    
+
     Ok(needs_indent_fix(&lines, start, end, content))
 }
 
@@ -655,7 +667,13 @@ fn needs_indent_fix_py(filepath: &str, start: usize, end: usize, content: &str) 
 /// Raises:
 ///     IOError: File not found or read error.
 #[pyfunction]
-fn verify_context_py(py: Python<'_>, filepath: &str, start: usize, end: usize, expected_hash: &str) -> PyResult<Py<PyDict>> {
+fn verify_context_py(
+    py: Python<'_>,
+    filepath: &str,
+    start: usize,
+    end: usize,
+    expected_hash: &str,
+) -> PyResult<Py<PyDict>> {
     let lines: Vec<String> = fs::read_to_string(filepath)
         .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
         .lines()
@@ -706,14 +724,23 @@ fn recommend_from_risk_py() -> String {
 /// Raises:
 ///     IOError: Write error or permission denied.
 #[pyfunction]
-fn write_atomic_with_dal_py(py: Python<'_>, filepath: &str, content: &str, dal_level: &str) -> PyResult<Py<PyDict>> {
+fn write_atomic_with_dal_py(
+    py: Python<'_>,
+    filepath: &str,
+    content: &str,
+    dal_level: &str,
+) -> PyResult<Py<PyDict>> {
     use moesniper::DalLevel;
 
     let level = match dal_level.to_uppercase().as_str() {
         "BASELINE" => DalLevel::Baseline,
         "ENHANCED" => DalLevel::Enhanced,
         "MAXIMUM" => DalLevel::Maximum,
-        _ => return Err(PyValueError::new_err("Invalid DAL level. Use: BASELINE, ENHANCED, MAXIMUM")),
+        _ => {
+            return Err(PyValueError::new_err(
+                "Invalid DAL level. Use: BASELINE, ENHANCED, MAXIMUM",
+            ))
+        }
     };
 
     let _config = SniperConfig::from_env();
@@ -833,7 +860,11 @@ fn count_recent_backups_py(filepath: &str, window_secs: u64) -> PyResult<usize> 
 /// Raises:
 ///     IOError: Purge failed.
 #[pyfunction]
-fn purge_old_backups_py(filepath: &str, retention_count: usize, max_age_days: u64) -> PyResult<usize> {
+fn purge_old_backups_py(
+    filepath: &str,
+    retention_count: usize,
+    max_age_days: u64,
+) -> PyResult<usize> {
     use moesniper::SniperConfig;
     let config = SniperConfig {
         backup_retention_count: retention_count,
@@ -861,13 +892,22 @@ fn purge_old_backups_py(filepath: &str, retention_count: usize, max_age_days: u6
 /// Raises:
 ///     IOError: File not found or read error.
 #[pyfunction]
-fn generate_preview_py(py: Python<'_>, filepath: &str, start: usize, end: usize, replacement: &str) -> PyResult<Py<PyDict>> {
+fn generate_preview_py(
+    py: Python<'_>,
+    filepath: &str,
+    start: usize,
+    end: usize,
+    replacement: &str,
+) -> PyResult<Py<PyDict>> {
     let text: Vec<String> = fs::read_to_string(filepath)
         .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
         .split_inclusive('\n')
         .map(String::from)
         .collect();
-    let new_lines: Vec<String> = replacement.split_inclusive('\n').map(String::from).collect();
+    let new_lines: Vec<String> = replacement
+        .split_inclusive('\n')
+        .map(String::from)
+        .collect();
 
     let preview = generate_preview(&text, &new_lines, start, end);
     let dict = PyDict::new(py);
