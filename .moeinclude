@@ -1,0 +1,4 @@
+# sniper source whitelist for moegraph scanner
+src/
+sniper-py/src/
+sniper-py/python/moesniper/
