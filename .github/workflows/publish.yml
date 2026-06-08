@@ -23,7 +23,7 @@ jobs:
           target: x86_64
           args: --release --out dist
       - name: Publish to TestPyPI
-        run: uv publish --publish-url https://test.pypi.org/legacy/ dist/*.whl
+        run: uv publish --publish-url https://test.pypi.org/legacy/ sniper-py/dist/*.whl
 
   pypi:
     needs: testpypi
@@ -43,4 +43,4 @@ jobs:
           target: x86_64
           args: --release --out dist
       - name: Publish to PyPI
-        run: uv publish dist/*.whl
+        run: uv publish sniper-py/dist/*.whl
