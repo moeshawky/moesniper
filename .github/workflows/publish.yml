@@ -18,6 +18,7 @@ jobs:
           target: x86_64-unknown-linux-gnu
           args: --release --out dist
           manylinux: auto
+          before-script-linux: "yum install -y python3-devel || apt-get update && apt-get install -y python3-dev || true"
       - name: Upload x86_64 wheel
         uses: actions/upload-artifact@v4
         with:
@@ -40,6 +41,7 @@ jobs:
           target: aarch64-unknown-linux-gnu
           args: --release --out dist
           manylinux: auto
+          before-script-linux: "yum install -y python3-devel || apt-get update && apt-get install -y python3-dev || true"
       - name: Upload aarch64 wheel
         uses: actions/upload-artifact@v4
         with:
