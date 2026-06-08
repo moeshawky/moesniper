@@ -22,11 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0
 - **manifest splice panic on delete-at-end:** Delete path (`op.delete`) now uses `.min(lines.len())` on range end instead of raw `e`.
 - **`needs_indent_fix` false positives:** Simplified to a min-leading check consistent with the auto-indent guard, preventing false positives on already-correct multi-level content.
 - **detect_expected_indent bounds:** Added `.min(all_lines.len())` guard to prevent slice panic on out-of-range line indices.
-- **context_hash unwired in manifest paths:** `sniper_manifest` (Python) and `cmd_manifest_impl` (CLI) now verify pre-edit context per operation, matching `sniper_edit` behavior. Removed `#[allow(unused_variables)]` suppression.
-- **hex+delete conflict silently resolved:** Manifest operations specifying both `hex` and `delete: true` now return an error instead of silently discarding the hex content.
-- **hex_encode unsafe block:** Replaced `unsafe { String::from_utf8_unchecked() }` with safe `String::from_utf8_lossy()`.
-- **stale temp files in write_atomic_impl:** Temp files are now cleaned up on error paths via a `CleanupGuard` drop guard that removes the file if the atomic rename fails.
-- **config f64 validation:** `pid_entropy_scale` and `pid_pressure_scale` now reject NaN, negative, infinite, and out-of-range values; validated to `(0.0..=100.0)`.
 
 ### Performance
 - **detect_space_step O(N²):** Replaced `Vec::contains` loop body with sort+dedup.
