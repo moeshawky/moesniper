@@ -47,7 +47,7 @@ jobs:
         run: |
           cd sniper-py
           export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          maturin build --release --out dist --target aarch64-unknown-linux-gnu -i python3
+          maturin build --release --out dist --target aarch64-unknown-linux-gnu -i python3.12
       - name: Upload aarch64 wheel
         uses: actions/upload-artifact@v4
         with:
