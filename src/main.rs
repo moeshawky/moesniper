@@ -108,10 +108,10 @@ fn run(args: Vec<String>) -> std::process::ExitCode {
         ["encode", text] => cmd_encode(text),
         [file, "--undo"] => cmd_undo(file),
         [file, "--manifest"] if use_stdin => {
-            cmd_manifest(file, None, dry_run, auto_indent, force_indent)
+            cmd_manifest(file, None, dry_run, auto_indent, force_indent, context_hash.as_deref())
         }
         [file, "--manifest", manifest] => {
-            cmd_manifest(file, Some(manifest), dry_run, auto_indent, force_indent)
+            cmd_manifest(file, Some(manifest), dry_run, auto_indent, force_indent, context_hash.as_deref())
         }
         [file, start, end, "--delete"] => {
             if use_stdin {
@@ -479,6 +479,7 @@ fn cmd_manifest(
     dry_run: bool,
     auto_indent: bool,
     force_indent: bool,
+    context_hash: Option<&str>,
 ) -> CliResult {
     let manifest = match manifest_path {
         Some(path) => match fs::read_to_string(path) {
@@ -493,7 +494,7 @@ fn cmd_manifest(
             }
         }
     };
-    cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, force_indent)
+    cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, force_indent, context_hash)
 }
 
 fn cmd_manifest_impl(
@@ -502,6 +503,7 @@ fn cmd_manifest_impl(
     dry_run: bool,
     auto_indent: bool,
     force_indent: bool,
+    context_hash: Option<&str>,
 ) -> CliResult {
     let config = SniperConfig::from_env();
 
@@ -571,12 +573,22 @@ fn cmd_manifest_impl(
         let actual_e = end.min(lines.len());
 
         if op.delete.unwrap_or(false) {
+            if op.hex.is_some() {
+                return err("Cannot both delete and insert in the same manifest operation".into());
+            }
             total_removed += lines.splice(s..actual_e, std::iter::empty()).count();
         } else if let Some(ref hex) = op.hex {
             let content = match hex_decode(hex) {
                 Ok(c) => c,
                 Err(e) => return err(format!("hex decode: {e}")),
             };
+
+            // Context verification before applying operation
+            if let Some(expected) = context_hash {
+                if let Err(e) = verify_context(&lines, op.start, actual_e, expected) {
+                    return err(e);
+                }
+            }
 
             // Apply auto-indent if needed
             let final_content =
@@ -951,7 +963,7 @@ mod tests {
         let manifest =
             r#"[{"start": 1, "end": 1, "hex": "78"}, {"start": 3, "end": 4, "delete": true}]"#;
         let manifest_path = create_file(&dir, "ops.json", manifest);
-        let r = cmd_manifest(&path, Some(&manifest_path), false, false, false);
+        let r = cmd_manifest(&path, Some(&manifest_path), false, false, false, None);
         assert_eq!(r.status, "ok");
         assert_eq!(r.operations, Some(2));
         let content = read_file(&path);
@@ -965,7 +977,7 @@ mod tests {
         let original = read_file(&path);
         let manifest = r#"[{"start": 1, "end": 1, "hex": "78"}]"#;
         let manifest_path = create_file(&dir, "ops.json", manifest);
-        let r = cmd_manifest(&path, Some(&manifest_path), true, false, false);
+        let r = cmd_manifest(&path, Some(&manifest_path), true, false, false, None);
         assert_eq!(r.status, "dry_run");
         let after = read_file(&path);
         assert_eq!(original, after);
@@ -976,7 +988,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "test.txt", "a\nb\n");
         let manifest_path = create_file(&dir, "ops.json", "not json");
-        let r = cmd_manifest(&path, Some(&manifest_path), false, false, false);
+        let r = cmd_manifest(&path, Some(&manifest_path), false, false, false, None);
         assert_eq!(r.status, "error");
         assert!(r.message.as_deref().unwrap().contains("parse manifest"));
     }
@@ -990,7 +1002,7 @@ mod tests {
             "ops.json",
             r#"[{"start": 10, "end": 15, "delete": true}]"#,
         );
-        let r = cmd_manifest(&path, Some(&manifest_path), false, false, false);
+        let r = cmd_manifest(&path, Some(&manifest_path), false, false, false, None);
         assert_eq!(r.status, "error");
         assert!(r.message.as_deref().unwrap().contains("out of bounds"));
     }

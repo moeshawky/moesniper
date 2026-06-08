@@ -261,7 +261,9 @@ fn sniper_delete(py: Python<'_>, filepath: &str, start: usize, end: usize) -> Py
 ///             delete (bool, optional): If true, deletes the range.
 ///     auto_indent (bool, optional): Auto-detect and apply indentation per op. Default None.
 ///     force_indent (bool, optional): Bypass indentation validation per op. Default None.
-///     context_hash (str, optional): Reserved for future per-operation context verification.
+///     context_hash (str, optional): SHA-256 prefix (16 hex chars) verified
+///         against surrounding context before each hex operation. Rejects edits
+///         if original content changed since line numbers were computed.
 ///     dry_run (bool, optional): Preview without applying changes. Default None.
 ///
 /// Returns:
@@ -283,7 +285,6 @@ fn sniper_delete(py: Python<'_>, filepath: &str, start: usize, end: usize) -> Py
 ///     IOError: File read failures.
 /// Indent params, dry_run, and context_hash default to None for backward compatibility.
 #[pyfunction(signature = (filepath, operations_json, auto_indent=None, force_indent=None, context_hash=None, dry_run=None))]
-#[allow(unused_variables)]
 fn sniper_manifest(
     py: Python<'_>,
     filepath: &str,
@@ -342,12 +343,20 @@ fn sniper_manifest(
             let range_start = s - 1;
             let actual_e = e.min(lines.len());
 
+            if op.delete.unwrap_or(false) && op.hex.is_some() {
+                return Err("Cannot both delete and insert in the same operation".to_string());
+            }
+
             if op.delete.unwrap_or(false) {
                 let removed = lines
                     .splice(range_start..actual_e, std::iter::empty())
                     .count();
                 total_removed += removed;
             } else if let Some(ref hex) = op.hex {
+                if let Some(expected) = context_hash {
+                    verify_context(&lines, op.start, actual_e, expected)?;
+                }
+
                 let decoded = hex_decode(hex)?;
 
                 // Apply auto-indent if needed (mirrors CLI cmd_manifest_impl)

@@ -185,8 +185,7 @@ pub fn hex_encode(data: &[u8]) -> String {
         buf.push(HEX_CHARS[(b >> 4) as usize]);
         buf.push(HEX_CHARS[(b & 0x0F) as usize]);
     }
-    // SAFETY: HEX_CHARS contains only ASCII hex digits, always valid UTF-8
-    unsafe { String::from_utf8_unchecked(buf) }
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
@@ -487,6 +486,28 @@ fn write_atomic_impl<S: AsRef<str>>(
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let tmp = format!("{filepath}.sniper_tmp.{ts}");
+
+    struct CleanupGuard<'a> {
+        path: &'a str,
+        active: bool,
+    }
+    impl<'a> CleanupGuard<'a> {
+        fn new(path: &'a str) -> Self {
+            Self { path, active: true }
+        }
+        fn disarm(&mut self) {
+            self.active = false;
+        }
+    }
+    impl<'a> Drop for CleanupGuard<'a> {
+        fn drop(&mut self) {
+            if self.active {
+                let _ = fs::remove_file(self.path);
+            }
+        }
+    }
+    let mut cleanup_guard = CleanupGuard::new(&tmp);
+
     let f = fs::File::create(&tmp).map_err(|e| format!("create tmp: {e}"))?;
 
     if let Ok(metadata) = fs::metadata(filepath) {
@@ -529,7 +550,10 @@ fn write_atomic_impl<S: AsRef<str>>(
     }
 
     match fs::rename(&tmp, filepath) {
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            cleanup_guard.disarm();
+            Ok(())
+        }
         Err(e) => Err(handle_backtrack_error(e, "Atomic write")),
     }
 }

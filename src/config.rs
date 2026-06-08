@@ -55,8 +55,12 @@ pub struct SniperConfig {
     /// Base sleep for PID pacing in milliseconds.
     pub pid_base_ms: u64,
     /// Entropy scale factor for PID pacing.
+    /// Valid range: 0.0-100.0. Negative, NaN, and Inf values are rejected.
+    /// Default: 0.5.
     pub pid_entropy_scale: f64,
     /// Pressure scale factor for PID pacing.
+    /// Valid range: 0.0-100.0. Negative, NaN, and Inf values are rejected.
+    /// Default: 1.0.
     pub pid_pressure_scale: f64,
 }
 
@@ -125,14 +129,18 @@ impl SniperConfig {
         // PID entropy scale: SNIPER_PID_ENTROPY_SCALE
         if let Ok(val) = env::var("SNIPER_PID_ENTROPY_SCALE") {
             if let Ok(scale) = val.parse::<f64>() {
-                config.pid_entropy_scale = scale;
+                if (0.0..=100.0).contains(&scale) && !scale.is_nan() {
+                    config.pid_entropy_scale = scale;
+                }
             }
         }
 
         // PID pressure scale: SNIPER_PID_PRESSURE_SCALE
         if let Ok(val) = env::var("SNIPER_PID_PRESSURE_SCALE") {
             if let Ok(scale) = val.parse::<f64>() {
-                config.pid_pressure_scale = scale;
+                if (0.0..=100.0).contains(&scale) && !scale.is_nan() {
+                    config.pid_pressure_scale = scale;
+                }
             }
         }
 
