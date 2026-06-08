@@ -6,26 +6,48 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-x86_64:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
-      - name: Build wheels (x86_64 + aarch64)
+      - name: Build x86_64 wheel
         uses: PyO3/maturin-action@v1
         with:
           working-directory: sniper-py
-          target: x86_64 aarch64
+          target: x86_64-unknown-linux-gnu
           args: --release --out dist
           manylinux: auto
-      - name: Upload wheels
+      - name: Upload x86_64 wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheels
+          name: wheel-x86_64
+          path: sniper-py/dist/*.whl
+
+  build-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Build aarch64 wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: sniper-py
+          target: aarch64-unknown-linux-gnu
+          args: --release --out dist
+          manylinux: auto
+      - name: Upload aarch64 wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-aarch64
           path: sniper-py/dist/*.whl
 
   testpypi:
-    needs: build
+    needs: [build-x86_64, build-aarch64]
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -33,8 +55,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: wheels
+          pattern: wheel-*
           path: dist
+          merge-multiple: true
       - uses: astral-sh/setup-uv@v4
       - name: Publish to TestPyPI
         run: uv publish --publish-url https://test.pypi.org/legacy/ --token ${{ secrets.TEST_PYPI_TOKEN }} dist/*.whl
@@ -48,8 +71,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: wheels
+          pattern: wheel-*
           path: dist
+          merge-multiple: true
       - uses: astral-sh/setup-uv@v4
       - name: Publish to PyPI
         run: uv publish --token ${{ secrets.PYPI_TOKEN }} dist/*.whl
