@@ -57,6 +57,8 @@ jobs:
   pypi:
     needs: [build-x86_64, build-aarch64]
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/p/moesniper
@@ -68,4 +70,4 @@ jobs:
           merge-multiple: true
       - uses: astral-sh/setup-uv@v4
       - name: Publish to PyPI
-        run: uv publish --token ${{ secrets.PYPI_TOKEN }} dist/*.whl
+        run: uv publish dist/*.whl
