@@ -40,7 +40,7 @@ use diff::generate_preview;
 use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
 
 use moesniper::{
-    check_file_size, count_recent_backups, create_backup, find_latest_backup,
+    check_file_size, compute_context_hash, count_recent_backups, create_backup, find_latest_backup,
     handle_backtrack_error, hex_decode, normalize_path, purge_old_backups, recommend_from_risk,
     verify_context, write_atomic_with_dal, RiskTelemetry, SniperConfig, SniperLock,
 };
@@ -106,6 +106,10 @@ fn run(args: Vec<String>) -> std::process::ExitCode {
             Err(e) => err(format!("read {path}: {e}")),
         },
         ["encode", text] => cmd_encode(text),
+        ["context", file, start, end] => match (parse_line(start), parse_line(end)) {
+            (Ok(s), Ok(e)) => cmd_context(file, s, e),
+            (Err(err_msg), _) | (_, Err(err_msg)) => err(err_msg),
+        },
         [file, "--undo"] => cmd_undo(file),
         [file, "--manifest"] if use_stdin => {
             cmd_manifest(file, None, dry_run, auto_indent, force_indent, context_hash.as_deref())
@@ -180,12 +184,19 @@ fn run(args: Vec<String>) -> std::process::ExitCode {
         );
     } else {
         match result.status.as_str() {
-            "ok" => println!(
-                "ok: {} -{} +{}",
-                result.file.as_deref().unwrap_or("?"),
-                result.lines_removed,
-                result.lines_inserted
-            ),
+            "ok" => {
+                if let Some(msg) = &result.message {
+                    // Used by 'context' command to output hash
+                    println!("{}", msg);
+                } else {
+                    println!(
+                        "ok: {} -{} +{}",
+                        result.file.as_deref().unwrap_or("?"),
+                        result.lines_removed,
+                        result.lines_inserted
+                    )
+                }
+            }
             "restored" => println!("restored: {}", result.backup.as_deref().unwrap_or("?")),
             "encoded" => println!("{}", result.message.as_deref().unwrap_or("")),
             "dry_run" => {
@@ -279,6 +290,44 @@ fn cmd_encode(text: &str) -> CliResult {
     CliResult {
         status: "encoded".into(),
         message: Some(hex),
+        ..Default::default()
+    }
+}
+
+fn cmd_context(filepath: &str, start: usize, end: usize) -> CliResult {
+    let config = SniperConfig::from_env();
+
+    if let Err(e) = normalize_path(filepath) {
+        return err(e);
+    }
+    if let Err(e) = check_file_size(filepath, config.max_file_size) {
+        return err(e);
+    }
+
+    let text = match fs::read_to_string(filepath) {
+        Ok(t) => t,
+        Err(e) => return err(format!("read file: {e}")),
+    };
+
+    let lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
+
+    if start < 1 || end > lines.len() || start > end + 1 {
+        if start == lines.len() + 1 && (start == end + 1 || start == end) {
+            // Allow computing context at end of file
+        } else {
+            return err(format!(
+                "line range {start}-{end} out of bounds (file has {} lines)",
+                lines.len()
+            ));
+        }
+    }
+
+    let full_hash = compute_context_hash(&lines, start, end);
+    let short_hash = full_hash[..16].to_string();
+
+    CliResult {
+        status: "ok".into(),
+        message: Some(short_hash),
         ..Default::default()
     }
 }
@@ -1134,6 +1183,22 @@ mod tests {
 
         let r = cmd_splice(&path, 3, 3, "NEW", false, false, false, Some(short_hash));
         assert_eq!(r.status, "ok");
+    }
+
+    #[test]
+    fn test_cmd_context() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "ctx_test.txt", "a\nb\nc\nd\ne\nf\ng\nh\n");
+
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(b"a\nb\n");
+        hasher.update(b"d\ne\nf\n");
+        let hash = moesniper::hex_encode(&hasher.finalize());
+        let short_hash = &hash[..16];
+
+        let r = cmd_context(&path, 3, 3);
+        assert_eq!(r.status, "ok");
+        assert_eq!(r.message.unwrap(), short_hash);
     }
 
     #[test]
