@@ -560,12 +560,9 @@ fn write_atomic_impl<S: AsRef<str>>(
 
 /// Verify pre-edit context: hash 3 lines before start and 3 lines after end,
 /// compare against the expected hash. Returns Ok if match, Err with message if not.
-pub fn verify_context(
-    lines: &[String],
-    start: usize,
-    end: usize,
-    expected_hash: &str,
-) -> Result<(), String> {
+/// Compute context hash: hashes 3 lines before start and 3 lines after end.
+/// Returns the full SHA-256 hash as a hex string.
+pub fn compute_context_hash(lines: &[String], start: usize, end: usize) -> String {
     let before_start = start.saturating_sub(1).saturating_sub(3);
     let before_end = (start.saturating_sub(1)).min(lines.len());
     let after_start = end;
@@ -583,7 +580,16 @@ pub fn verify_context(
         }
     }
     let hash = hasher.finalize();
-    let actual_hex = hex_encode(&hash);
+    hex_encode(&hash)
+}
+
+pub fn verify_context(
+    lines: &[String],
+    start: usize,
+    end: usize,
+    expected_hash: &str,
+) -> Result<(), String> {
+    let actual_hex = compute_context_hash(lines, start, end);
     let actual_short = &actual_hex[..16];
 
     if actual_short == expected_hash {
@@ -726,6 +732,30 @@ mod tests {
     use std::fs;
     use std::io;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_compute_context_hash() {
+        let lines: Vec<String> = vec![
+            "1".into(), "2".into(), "3".into(), "4".into(), "5".into(),
+            "6".into(), "7".into(), "8".into(), "9".into(), "10".into()
+        ];
+
+        let start = 5;
+        let end = 6;
+
+        // expected to hash lines 2, 3, 4 before and 7, 8, 9 after
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(b"2");
+        hasher.update(b"3");
+        hasher.update(b"4");
+        hasher.update(b"7");
+        hasher.update(b"8");
+        hasher.update(b"9");
+        let expected_hash = hex_encode(&hasher.finalize());
+
+        let hash = compute_context_hash(&lines, start, end);
+        assert_eq!(hash, expected_hash);
+    }
 
     #[test]
     fn test_resource_guard_for_testing_controlled_entropy() {

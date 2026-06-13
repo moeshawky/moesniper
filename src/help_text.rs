@@ -9,6 +9,7 @@ USAGE:
     sniper <file> --manifest <path>         Batch operations from JSON
     sniper <file> --undo                    Restore from backup
     sniper encode [--stdin|--file <path>|<text>]  Hex-encode content
+    sniper context <file> <start> <end>     Compute context hash for a given line range
 
 FLAGS:
     --dry-run           Preview changes without applying
@@ -18,6 +19,17 @@ FLAGS:
     --auto-indent       Auto-detect and apply indentation from context
     --force-indent      Bypass indentation validation (allow unindented content)
     -v, --version       Print version and exit
+
+CONTEXT VERIFICATION:
+    The `--context <hash>` flag allows rejecting an edit if the file has changed
+    around the edit site.
+
+    The hash is the first 16 hex characters of the SHA-256 of the concatenated raw bytes
+    (including all newlines) of exactly 3 lines before the `<start>` line, and exactly
+    3 lines after the `<end>` line. Line numbers are not part of the hash.
+
+    You can generate the context hash using the command:
+        sniper context file.rs <start> <end>
 
 QUICK START:
     # Replace line 5 with "hello"
