@@ -179,11 +179,38 @@ fn detect_expected_indent(all_lines: &[String], start_line: usize) -> (IndentSty
     let idx = start_line.saturating_sub(1).min(all_lines.len());
     let window_start = idx.saturating_sub(MAX_SCAN_BACK);
     let window = &all_lines[window_start..idx];
-    let style = if window.len() >= 3 {
+
+    // Count indented lines in the backward window to assess signal strength.
+    let indented_in_window = window
+        .iter()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.is_empty()
+                && (line.chars().take_while(|c| *c == ' ').count() > 0
+                    || line.chars().take_while(|c| *c == '\t').count() > 0)
+        })
+        .count();
+
+    // For style detection, use a broader context to avoid module-docstring bias.
+    // When the backward window is at the file top AND has weak signal (< 2 indented lines),
+    // include lines AFTER the edit point so we see actual code structure.
+    let style = if window_start == 0 && all_lines.len() > idx && indented_in_window < 2 {
+        // At file top with weak backward signal: use forward context for style detection
+        let forward_end = (idx + MAX_SCAN_BACK).min(all_lines.len());
+        let mut combined = Vec::with_capacity(window.len() + forward_end - idx);
+        combined.extend_from_slice(window);
+        combined.extend_from_slice(&all_lines[idx..forward_end]);
+        if combined.len() >= 3 {
+            detect_indent_style(&combined)
+        } else {
+            detect_indent_style(all_lines)
+        }
+    } else if window.len() >= 3 {
         detect_indent_style(window)
     } else {
         detect_indent_style(all_lines)
     };
+
     let step = if style.uses_tabs {
         1
     } else {
