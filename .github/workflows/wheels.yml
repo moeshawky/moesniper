@@ -50,7 +50,7 @@ jobs:
               yum install -y openssl-devel || true
           - os: ubuntu-24.04-arm
             target: aarch64
-            manylinux: "off"
+            manylinux: auto
             pre-build: |
               sudo apt-get update && sudo apt-get install -y build-essential || true
 
