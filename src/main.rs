@@ -394,7 +394,6 @@ fn cmd_splice(
     let config_for_dal = SniperConfig::from_env();
 
     if dry_run {
-        let recommended_action = Some(recommend_from_risk(&risk));
         let ai_hint = Some(if is_delete {
             format!("verify: {} around line {}", filepath, start)
         } else {
@@ -410,8 +409,8 @@ fn cmd_splice(
             indent_warning,
             indent_fixed,
             line_shift: Some(new_lines.len() as i64 - removed_lines_count as i64),
-            risk: Some(risk),
-            recommended_action,
+            risk: None,
+            recommended_action: None,
             ..Default::default()
         };
     }
@@ -678,7 +677,8 @@ fn cmd_manifest_impl(
         filepath,
         ops.first().map(|o| o.start).unwrap_or(1)
     ));
-    let recommended_action = Some(recommend_from_risk(&risk));
+
+    let recommended_action = if dry_run { None } else { Some(recommend_from_risk(&risk)) };
 
     CliResult {
         status: if dry_run { "dry_run" } else { "ok" }.into(),
@@ -690,7 +690,7 @@ fn cmd_manifest_impl(
         ai_hint,
         backup: bk,
         line_shift: Some(total_inserted as i64 - total_removed as i64),
-        risk: Some(risk),
+        risk: if dry_run { None } else { Some(risk) },
         recommended_action,
         ..Default::default()
     }
