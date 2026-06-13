@@ -551,9 +551,9 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "llmosafe"
-version = "0.7.1"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7e740662002494948b59efd1ea4f0853d25d17d9cdce951abe5b50637767b66"
+checksum = "ca88176ab84ceb507b2d62465f467f1578a378e5cf5490171d14fc14ece9b70b"
 dependencies = [
  "cbindgen",
  "libc",

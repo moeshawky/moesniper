@@ -3,7 +3,22 @@
 All notable changes to moesniper will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v0.0.0.html).
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Fixed
+- **manifest dry-run per-operation diffs:** Added `manifest_ops` field to dry-run JSON output with per-operation diff previews for both insert and delete operations.
+- **auto-indent module docstring bug (BUG-1):** Auto-indent now correctly ignores module-level docstrings when detecting indentation style, preventing 2-space module docstrings from polluting function body indentation.
+- **context hash documentation (BUG-2):** Added `sniper context <file> <start> <end>` CLI command and documented exact SHA-256 computation (3 lines before/after, byte-level including newlines).
+- **dry-run risk telemetry noise (BUG-3):** Removed `risk` and `recommended_action` fields from dry-run JSON output in both `sniper_edit` and `sniper_manifest`.
+
+### Added
+- **cargo-deny configuration:** Added `deny.toml` with advisory ignore for unmaintained `atty`, license allowlist (MIT, Apache-2.0, MPL-2.0, Unicode-3.0), and bans configured to allow multiple versions.
+
+### Changed
+- **llmosafe upgraded:** 0.7.1 → 0.7.4 (no breaking changes, public API compatible).
+- **CHANGELOG format:** Updated SemVer spec reference from v0.0.0 to v2.0.0.
 
 ## [0.7.6] - 2026-06-08
 

@@ -1,0 +1,130 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# MASTER: Unified Python Wheel Build + Publish (ix / sniper / llmosafe)
+# ═══════════════════════════════════════════════════════════════════════════════
+# This is the CANONICAL workflow. All three projects use identical copies.
+# Only the PROJECT env var below differs. Do NOT diverge from this template.
+#
+# Canonical source: /workspace/.github/workflows/wheels.yml
+# Local build:      /workspace/.github/scripts/build-wheels.sh
+# Reference:        /workspace/PUBLISHING.md
+#
+# To adopt for a new project:
+#   1. Copy this file to .github/workflows/wheels.yml
+#   2. Change PROJECT below
+#   3. Set up Trusted Publishing on pypi.org and test.pypi.org for the repo
+#   4. Add a "pypi" environment in repo Settings > Environments
+# ═══════════════════════════════════════════════════════════════════════════════
+
+name: Wheels
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# ── Project identity (ONLY line that differs between projects) ──────────────
+env:
+  PROJECT: sniper                          # ← CHANGE THIS: ix | sniper | llmosafe
+  PYTHON_VERSION: "3.12"
+
+# ── Concurrency: cancel in-progress on re-push ──────────────────────────────
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════════
+  # Linux wheels — all projects
+  # ════════════════════════════════════════════════════════════════════════════
+  build-linux:
+    name: linux (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64
+            manylinux: auto
+            pre-build: |
+              yum install -y openssl-devel || true
+          - os: ubuntu-24.04-arm
+            target: aarch64
+            manylinux: "off"
+            pre-build: |
+              sudo apt-get update && sudo apt-get install -y build-essential || true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ env.PROJECT }}-py
+          args: --release --out dist -i python${{ env.PYTHON_VERSION }}
+          manylinux: ${{ matrix.manylinux }}
+          before-script-linux: ${{ matrix.pre-build }}
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.target }}
+          path: ${{ env.PROJECT }}-py/dist/
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Publish to TestPyPI — on every tag push and manual dispatch
+  # ════════════════════════════════════════════════════════════════════════════
+  publish-testpypi:
+    name: Publish → TestPyPI
+    needs: [build-linux]
+    if: always() && !cancelled() && !failure()
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist
+          skip-existing: true
+          attestations: false
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Publish to PyPI — on tag push only (not manual dispatch by default)
+  # ════════════════════════════════════════════════════════════════════════════
+  publish-pypi:
+    name: Publish → PyPI
+    needs: [build-linux]
+    if: |
+      always() &&
+      !cancelled() &&
+      !failure() &&
+      startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/${{ env.PROJECT == 'ix' && 'moeix' || env.PROJECT == 'sniper' && 'moesniper' || 'llmosafe' }}
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+          attestations: false

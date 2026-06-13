@@ -8,13 +8,20 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-/// Security policy configuration.
+/// Security policy configuration for path validation.
+///
+/// Controls which path patterns are rejected and whether base directory
+/// containment is enforced. Use `SecurityPolicy::default()` for the
+/// standard policy that rejects parent references without base restriction.
 #[derive(Debug, Clone)]
 pub struct SecurityPolicy {
     /// Base directory that all paths must be within.
-    /// If None, base directory containment is NOT enforced.
+    /// When set, `validate_path` rejects any path that resolves outside
+    /// this directory. When None, base directory containment is NOT enforced.
     pub base_dir: Option<PathBuf>,
     /// Whether to reject paths containing parent references (..).
+    /// When true, any path component equal to `..` triggers
+    /// `PathSecurityError::ParentReferenceNotAllowed`.
     pub reject_parent_refs: bool,
 }
 
@@ -28,13 +35,19 @@ impl Default for SecurityPolicy {
 }
 
 /// Path validation error types.
+///
+/// Produced by `validate_path` when a path violates the security policy.
+/// Each variant identifies the specific violation for targeted error handling.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PathSecurityError {
-    /// Path contains a parent directory reference (..).
+    /// Path contains a parent directory reference (..) and policy rejects it.
+    /// The `component` field contains the offending path component string.
     ParentReferenceNotAllowed { component: String },
-    /// Path resolves outside the allowed base directory.
+    /// Path resolves outside the allowed base directory after canonicalization.
+    /// Contains both the resolved `path` and the configured `base` for diagnostics.
     EscapesBaseDirectory { path: PathBuf, base: PathBuf },
-    /// Filesystem I/O error occurred during validation.
+    /// Filesystem I/O error occurred during path resolution or canonicalization.
+    /// The string contains the OS error description.
     IoError(String),
 }
 

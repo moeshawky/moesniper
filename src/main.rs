@@ -194,7 +194,7 @@ fn run(args: Vec<String>) -> std::process::ExitCode {
                         result.file.as_deref().unwrap_or("?"),
                         result.lines_removed,
                         result.lines_inserted
-                    )
+                    );
                 }
             }
             "restored" => println!("restored: {}", result.backup.as_deref().unwrap_or("?")),
@@ -283,6 +283,17 @@ struct CliResult {
     /// Human-readable recommended action based on risk assessment.
     #[serde(skip_serializing_if = "Option::is_none")]
     recommended_action: Option<String>,
+    /// Per-operation diffs for manifest dry-run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest_ops: Option<Vec<ManifestOpDiff>>,
+}
+
+/// Diff preview for a single manifest operation.
+#[derive(Debug, Clone, serde::Serialize)]
+struct ManifestOpDiff {
+    start: usize,
+    end: usize,
+    diff_preview: Vec<String>,
 }
 
 fn cmd_encode(text: &str) -> CliResult {
@@ -574,13 +585,9 @@ fn cmd_manifest_impl(
         Err(e) => return err(format!("parse manifest: {e}")),
     };
 
-    for op in &ops {
-        if let Some(ref hex) = op.hex {
-            if let Err(e) = hex_decode(hex) {
-                return err(format!("hex decode in manifest: {e}"));
-            }
-        }
-    }
+    // Note: hex validation occurs at decode time in the operation loop below (line ~629).
+    // Pre-validating here would decode twice — the operation loop catches decode errors
+    // at the point of use.
 
     let text = match fs::read_to_string(filepath) {
         Ok(t) => t,
@@ -601,6 +608,8 @@ fn cmd_manifest_impl(
     };
     let mut total_removed = 0usize;
     let mut total_inserted = 0usize;
+    // Collect per-operation diffs for dry-run
+    let mut manifest_ops: Vec<ManifestOpDiff> = Vec::new();
 
     for op in &ops {
         let start = op.start;
@@ -625,6 +634,17 @@ fn cmd_manifest_impl(
                 return err("Cannot both delete and insert in the same manifest operation".into());
             }
             total_removed += lines.splice(s..actual_e, std::iter::empty()).count();
+
+            // Collect per-operation diff for dry-run (delete)
+            if dry_run {
+                let new_empty: Vec<String> = Vec::new();
+                let diff_preview = generate_preview(&lines, &new_empty, op.start, actual_e);
+                manifest_ops.push(ManifestOpDiff {
+                    start: op.start,
+                    end: actual_e,
+                    diff_preview,
+                });
+            }
         } else if let Some(ref hex) = op.hex {
             let content = match hex_decode(hex) {
                 Ok(c) => c,
@@ -673,6 +693,17 @@ fn cmd_manifest_impl(
                 .split_inclusive('\n')
                 .map(String::from)
                 .collect();
+
+            // Collect per-operation diff for dry-run
+            if dry_run {
+                let diff_preview = generate_preview(&lines, &new, op.start, actual_e);
+                manifest_ops.push(ManifestOpDiff {
+                    start: op.start,
+                    end: actual_e,
+                    diff_preview,
+                });
+            }
+
             total_removed += actual_e - s;
             total_inserted += new.len();
             if s < lines.len() {
@@ -741,6 +772,7 @@ fn cmd_manifest_impl(
         line_shift: Some(total_inserted as i64 - total_removed as i64),
         risk: if dry_run { None } else { Some(risk) },
         recommended_action,
+        manifest_ops: if dry_run { Some(manifest_ops) } else { None },
         ..Default::default()
     }
 }
@@ -758,10 +790,16 @@ fn cmd_undo(filepath: &str) -> CliResult {
         Err(e) => return err(e),
     };
 
-    // Restoration: simple copy. We do NOT create a backup of the state we are overwriting
-    // to allow consecutive undos to pop the stack.
-    if let Err(e) = fs::copy(&latest, filepath) {
-        return err(format!("restore: {e}"));
+    // Restoration: atomic copy via temp file + rename. We do NOT create a backup
+    // of the state we are overwriting to allow consecutive undos to pop the stack.
+    let tmp = format!("{}.sniper_undo_tmp", filepath);
+    if let Err(e) = fs::copy(&latest, &tmp) {
+        let _ = fs::remove_file(&tmp);
+        return err(format!("restore (copy to temp): {e}"));
+    }
+    if let Err(e) = fs::rename(&tmp, filepath) {
+        let _ = fs::remove_file(&tmp);
+        return err(format!("restore (rename): {e}"));
     }
 
     // "Pop" the stack: remove the consumed backup.

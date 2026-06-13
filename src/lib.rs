@@ -89,10 +89,10 @@ impl RiskTelemetry {
         let entropy = guard.raw_entropy();
         let pressure = guard.pressure();
         let system_mem = ResourceGuard::system_memory_bytes() as u64;
-        // Estimate used_bytes: ceiling is ~50% of system_mem for auto(0.5),
-        // but since memory_ceiling_bytes is private, derive from pressure.
-        // used_bytes = estimated_ceiling * pressure / 100
-        let estimated_ceiling = system_mem / 2; // auto(0.5) uses 50%
+        // memory_ceiling_bytes is a private field of ResourceGuard.
+        // Derive used_bytes from system memory and pressure directly.
+        // used_bytes = system_mem * pressure / 100
+        let estimated_ceiling = system_mem / 2;
         let used_bytes = estimated_ceiling * u64::from(pressure) / 100;
         let classifier_score = sigmoid_f64(entropy as f64 / 1000.0);
         Self {
@@ -372,9 +372,20 @@ pub fn find_latest_backup(filepath: &str) -> Result<Option<PathBuf>, String> {
 }
 
 /// Writes content to a file atomically using a temporary file and rename.
+///
+/// Creates an internal ResourceGuard for metabolic pacing. For callers that
+/// already have a guard, use `write_atomic_with_guard` or `write_atomic_with_dal`.
+///
+/// # Arguments
+/// * `filepath` - Target file path.
+/// * `lines` - Content lines to write.
+///
+/// # Returns
+/// `Ok(())` on success. `Err(message)` if resource check fails or write fails.
 pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
+    let guard = ResourceGuard::auto(0.5);
     let has_trailing_newline = check_trailing_newline(filepath)?;
-    write_atomic_impl(filepath, lines, has_trailing_newline)
+    write_atomic_impl(filepath, lines, has_trailing_newline, &guard)
 }
 
 /// Atomic write gated by a pre-created ResourceGuard.
@@ -408,7 +419,7 @@ pub fn write_atomic_with_guard(
     guard.check().map_err(|e| format!("resource safety: {e}"))?;
 
     let has_trailing_newline = check_trailing_newline(filepath)?;
-    write_atomic_impl(filepath, lines, has_trailing_newline)
+    write_atomic_impl(filepath, lines, has_trailing_newline, guard)
 }
 
 /// Atomic write gated by a pre-created ResourceGuard with DAL-level enforcement.
@@ -443,7 +454,7 @@ pub fn write_atomic_with_dal(
     }
 
     let has_trailing_newline = check_trailing_newline(filepath)?;
-    write_atomic_impl(filepath, lines, has_trailing_newline)
+    write_atomic_impl(filepath, lines, has_trailing_newline, guard)
 }
 
 fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
@@ -476,10 +487,23 @@ fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
 /// - The last line gets a newline ONLY if the original file had one
 ///
 /// This ensures deterministic behavior regardless of input format.
+///
+/// # Arguments
+/// * `filepath` - Target file path for atomic write.
+/// * `lines` - Content lines to write (trailing newlines stripped uniformly).
+/// * `has_trailing_newline` - Whether the original file ended with a newline.
+/// * `guard` - Pre-created ResourceGuard for metabolic pacing metrics.
+///
+/// # Returns
+/// `Ok(())` on successful atomic rename. `Err(message)` on any I/O or resource failure.
+///
+/// # Errors
+/// Returns error if temp file creation, write, flush, resource check, or rename fails.
 fn write_atomic_impl<S: AsRef<str>>(
     filepath: &str,
     lines: &[S],
     has_trailing_newline: bool,
+    guard: &ResourceGuard,
 ) -> Result<(), String> {
     let ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -531,11 +555,9 @@ fn write_atomic_impl<S: AsRef<str>>(
         }
     }
     f.into_inner().map_err(|e| format!("flush: {e}"))?;
-    // Metabolic Pacing: PID-configured sleep using live ResourceGuard metrics.
-    // ResourceGuard::auto(0.5) uses 50% of system memory as the safety ceiling,
-    // adapting to different deployment environments.
-    let guard = ResourceGuard::auto(0.5);
-    guard.check().map_err(|e| format!("resource safety: {e}"))?;
+    // Metabolic Pacing: PID-configured sleep using the caller's ResourceGuard metrics.
+    // The guard is created by the caller (write_atomic, write_atomic_with_guard,
+    // or write_atomic_with_dal) and shared here to avoid dual-guard divergence.
     let entropy = guard.raw_entropy();
     let pressure = guard.pressure();
     let config = SniperConfig::from_env();
@@ -663,6 +685,11 @@ fn is_process_alive(pid: u32) -> bool {
     Path::new(&format!("/proc/{}", pid)).exists()
 }
 
+/// Check if a process with the given PID is alive.
+///
+/// Non-Unix fallback: always returns true because there is no portable
+/// way to check process liveness. Stale lock detection relies on timeout
+/// expiry only on non-Unix platforms.
 #[cfg(not(unix))]
 fn is_process_alive(_pid: u32) -> bool {
     true
@@ -694,7 +721,12 @@ impl SniperLock {
             {
                 Ok(mut f) => {
                     let pid = std::process::id();
-                    let _ = write!(f, "{}", pid);
+                    if let Err(e) = write!(f, "{}", pid) {
+                        return Err(format!("lock PID write for {filepath}: {e}"));
+                    }
+                    if let Err(e) = f.flush() {
+                        return Err(format!("lock PID flush for {filepath}: {e}"));
+                    }
                     return Ok(Self { lock_path });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
