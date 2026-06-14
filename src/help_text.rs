@@ -114,7 +114,7 @@ NOTES:
     - Insert at end: Use line N+1 where N is file length
     - All edits are atomic (temp file + rename)
     - PID-based file locks with stale lock auto-recovery
-    - Metabolic pacing via llmosafe 0.7.1 ResourceGuard
+    - Metabolic pacing via llmosafe 0.7.5 ResourceGuard
 
 For more: https://github.com/moeshawky/moesniper
 "#;

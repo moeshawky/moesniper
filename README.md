@@ -30,7 +30,7 @@ sniper file.rs --undo
 | **Indentation safety** | Validation blocks mis-indented edits; `--auto-indent` fixes them, `--force-indent` bypasses |
 | **Context verification** | `--context <hash>` verifies SHA-256 of surrounding lines before applying |
 | **PID file locks** | Per-file locks with stale PID detection — auto-recovery if previous process died |
-| **Metabolic pacing** | `llmosafe 0.6.2` `ResourceGuard::auto(0.5)` — adaptive back-pressure based on RSS, IO wait, and load |
+| **Metabolic pacing** | `llmosafe 0.7.5` `ResourceGuard::auto(0.5)` — adaptive back-pressure based on RSS, IO wait, and load |
 | **Path traversal protection** | `..` components rejected, `SecurityPolicy` guards all file access |
 | **Configurable limits** | File size, backup retention, lock timeout — all via environment variables |
 | **JSON output** | `--json` for machine-readable results |

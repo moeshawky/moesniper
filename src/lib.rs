@@ -480,7 +480,7 @@ fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
     Ok(last_byte[0] == b'\n')
 }
 
-/// Unified atomic write with metabolic pacing via llmosafe 0.7.1.
+/// Unified atomic write with metabolic pacing via llmosafe 0.7.5.
 ///
 /// Trailing newlines are stripped from each line, then:
 /// - All lines except the last get a newline appended
@@ -656,7 +656,7 @@ pub fn count_recent_backups(filepath: &str, window_secs: u64) -> Result<usize, S
 
 /// Centralized handling for llmosafe Backtrack Signal (-7).
 ///
-/// `DeadlineExceeded` (-7) remains a valid `KernelError` variant in llmosafe 0.7.1+,
+/// `DeadlineExceeded` (-7) remains a valid `KernelError` variant in llmosafe 0.7.5+,
 /// used in `check_blocking()`, `check_with_deadline()`, and the C-ABI decision codes.
 /// However, resource exhaustion now surfaces via `KernelError` from
 /// `ResourceGuard::check()` rather than OS-level signals on IO operations.
@@ -768,8 +768,16 @@ mod tests {
     #[test]
     fn test_compute_context_hash() {
         let lines: Vec<String> = vec![
-            "1".into(), "2".into(), "3".into(), "4".into(), "5".into(),
-            "6".into(), "7".into(), "8".into(), "9".into(), "10".into()
+            "1".into(),
+            "2".into(),
+            "3".into(),
+            "4".into(),
+            "5".into(),
+            "6".into(),
+            "7".into(),
+            "8".into(),
+            "9".into(),
+            "10".into(),
         ];
 
         let start = 5;

@@ -111,12 +111,22 @@ fn run(args: Vec<String>) -> std::process::ExitCode {
             (Err(err_msg), _) | (_, Err(err_msg)) => err(err_msg),
         },
         [file, "--undo"] => cmd_undo(file),
-        [file, "--manifest"] if use_stdin => {
-            cmd_manifest(file, None, dry_run, auto_indent, force_indent, context_hash.as_deref())
-        }
-        [file, "--manifest", manifest] => {
-            cmd_manifest(file, Some(manifest), dry_run, auto_indent, force_indent, context_hash.as_deref())
-        }
+        [file, "--manifest"] if use_stdin => cmd_manifest(
+            file,
+            None,
+            dry_run,
+            auto_indent,
+            force_indent,
+            context_hash.as_deref(),
+        ),
+        [file, "--manifest", manifest] => cmd_manifest(
+            file,
+            Some(manifest),
+            dry_run,
+            auto_indent,
+            force_indent,
+            context_hash.as_deref(),
+        ),
         [file, start, end, "--delete"] => {
             if use_stdin {
                 err("cannot use --stdin with --delete".into())
@@ -553,7 +563,14 @@ fn cmd_manifest(
             }
         }
     };
-    cmd_manifest_impl(filepath, &manifest, dry_run, auto_indent, force_indent, context_hash)
+    cmd_manifest_impl(
+        filepath,
+        &manifest,
+        dry_run,
+        auto_indent,
+        force_indent,
+        context_hash,
+    )
 }
 
 fn cmd_manifest_impl(
@@ -758,7 +775,11 @@ fn cmd_manifest_impl(
         ops.first().map(|o| o.start).unwrap_or(1)
     ));
 
-    let recommended_action = if dry_run { None } else { Some(recommend_from_risk(&risk)) };
+    let recommended_action = if dry_run {
+        None
+    } else {
+        Some(recommend_from_risk(&risk))
+    };
 
     CliResult {
         status: if dry_run { "dry_run" } else { "ok" }.into(),

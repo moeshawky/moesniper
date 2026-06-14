@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **cargo-deny configuration:** Added `deny.toml` with advisory ignore for unmaintained `atty`, license allowlist (MIT, Apache-2.0, MPL-2.0, Unicode-3.0), and bans configured to allow multiple versions.
 
 ### Changed
-- **llmosafe upgraded:** 0.7.1 → 0.7.4 (no breaking changes, public API compatible).
+- **llmosafe upgraded:** 0.7.4 → 0.7.5 (breaking ABI change in getter functions — no impact on sniper, which only uses `ResourceGuard`).
 - **CHANGELOG format:** Updated SemVer spec reference from v0.0.0 to v2.0.0.
 
 ## [0.7.6] - 2026-06-08
