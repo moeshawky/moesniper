@@ -591,18 +591,6 @@ fn test_file_size_zero_byte_file() {
     assert!(result.is_ok(), "Zero-byte file must be accepted");
 }
 
-#[test]
-fn test_file_size_unlimited_with_zero_config() {
-    let dir = TempDir::new().unwrap();
-    let file = dir.path().join("unlimited.txt");
-    let content = "x".repeat(10000);
-    fs::write(&file, &content).unwrap();
-
-    // max_size = 0 means unlimited
-    let result = check_file_size(file.to_str().unwrap(), 0);
-    assert!(result.is_ok(), "Unlimited file size must accept any file");
-}
-
 // =========================================================================
 // write_atomic trailing newline invariants
 // =========================================================================

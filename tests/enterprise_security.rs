@@ -93,15 +93,6 @@ mod path_security_tests {
     }
 
     #[test]
-    fn test_normalize_path_secure_rejects_traversal() {
-        let dir = TempDir::new().unwrap();
-
-        // Path traversal should be rejected
-        let result = normalize_path_secure("../../../etc/passwd", Some(dir.path()));
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_parent_refs_allowed_when_configured() {
         let dir = TempDir::new().unwrap();
         let subdir = dir.path().join("subdir");

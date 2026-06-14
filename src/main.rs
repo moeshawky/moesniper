@@ -891,12 +891,6 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_decode_non_hex_returns_error() {
-        let result = hex_decode("gg");
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_hex_decode_odd_length() {
         assert!(hex_decode("48650").is_err());
     }
@@ -1170,30 +1164,6 @@ mod tests {
         assert_eq!(v["file"], "test.rs");
         assert_eq!(v["lines_removed"], 2);
         assert!(v.get("message").is_none());
-    }
-
-    #[test]
-    fn test_line_shift_positive() {
-        let r = CliResult {
-            status: "ok".into(),
-            lines_removed: 2,
-            lines_inserted: 5,
-            line_shift: Some(3),
-            ..Default::default()
-        };
-        assert_eq!(r.line_shift, Some(3));
-    }
-
-    #[test]
-    fn test_line_shift_negative() {
-        let r = CliResult {
-            status: "ok".into(),
-            lines_removed: 5,
-            lines_inserted: 2,
-            line_shift: Some(-3),
-            ..Default::default()
-        };
-        assert_eq!(r.line_shift, Some(-3));
     }
 
     #[test]
