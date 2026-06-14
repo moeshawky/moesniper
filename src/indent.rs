@@ -119,10 +119,10 @@ fn detect_space_step(levels: &[usize]) -> usize {
     // Candidate steps to test: each distinct non-zero space count,
     // plus each difference between distinct counts
     let mut candidates: Vec<usize> = freq.keys().copied().filter(|&k| k > 0).collect();
-    let mut sorted_keys: Vec<usize> = candidates.clone();
-    sorted_keys.sort_unstable();
-    for w in sorted_keys.windows(2) {
-        let d = w[1] - w[0];
+    candidates.sort_unstable();
+    let initial_len = candidates.len();
+    for i in 0..initial_len.saturating_sub(1) {
+        let d = candidates[i + 1] - candidates[i];
         if d > 0 {
             candidates.push(d);
         }

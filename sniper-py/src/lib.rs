@@ -155,10 +155,11 @@ fn sniper_edit(
         let bk = create_backup(filepath)?;
 
         let mut modified = lines;
+        let new_lines_len = new_lines.len();
         if s < modified.len() {
-            modified.splice(s..end.min(modified.len()), new_lines.clone());
+            modified.splice(s..end.min(modified.len()), new_lines);
         } else {
-            modified.extend(new_lines.clone());
+            modified.extend(new_lines);
         }
 
         let refs: Vec<&str> = modified.iter().map(|s| s.as_str()).collect();
@@ -181,12 +182,12 @@ fn sniper_edit(
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            Ok((modified.len(), removed, new_lines.len(), bk, Some(preview)))
+            Ok((modified.len(), removed, new_lines_len, bk, Some(preview)))
         } else {
             write_atomic_with_dal(filepath, &refs, &guard, config.dal_level)?;
             let _ = purge_old_backups(filepath, &config);
 
-            Ok((modified.len(), removed, new_lines.len(), bk, None))
+            Ok((modified.len(), removed, new_lines_len, bk, None))
         }
     })();
 
@@ -389,14 +390,15 @@ fn sniper_manifest(
                     .split_inclusive('\n')
                     .map(String::from)
                     .collect();
+                let new_len = new.len();
                 let removed = if range_start < lines.len() {
-                    lines.splice(range_start..actual_e, new.clone()).count()
+                    lines.splice(range_start..actual_e, new).count()
                 } else {
-                    lines.extend(new.clone());
+                    lines.extend(new);
                     0
                 };
                 total_removed += removed;
-                total_inserted += new.len();
+                total_inserted += new_len;
             }
         }
 

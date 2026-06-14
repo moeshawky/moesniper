@@ -36,9 +36,8 @@ use std::io::Read;
 use moesniper::{
     auto_indent_content, check_file_size, compute_context_hash, count_recent_backups,
     create_backup, find_latest_backup, generate_preview, handle_backtrack_error, hex_decode,
-    needs_indent_fix, normalize_path, purge_old_backups, recommend_from_risk,
-    validate_indentation, verify_context, write_atomic_with_dal, ManifestOp, RiskTelemetry,
-    SniperConfig, SniperLock,
+    needs_indent_fix, normalize_path, purge_old_backups, recommend_from_risk, validate_indentation,
+    verify_context, write_atomic_with_dal, ManifestOp, RiskTelemetry, SniperConfig, SniperLock,
 };
 
 use llmosafe::ResourceGuard;
