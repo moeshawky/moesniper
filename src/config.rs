@@ -231,4 +231,85 @@ mod tests {
         // Just verify it doesn't panic
         let _config = SniperConfig::from_env();
     }
+
+    // ---------------------------------------------------------------------------
+    // DalLevel::from_env() tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_dal_level_from_env_baseline() {
+        std::env::remove_var("SNIPER_DAL_LEVEL");
+        assert_eq!(DalLevel::from_env(), DalLevel::Baseline);
+    }
+
+    #[test]
+    fn test_dal_level_from_env_enhanced() {
+        std::env::set_var("SNIPER_DAL_LEVEL", "Enhanced");
+        assert_eq!(DalLevel::from_env(), DalLevel::Enhanced);
+        std::env::remove_var("SNIPER_DAL_LEVEL");
+    }
+
+    #[test]
+    fn test_dal_level_from_env_maximum() {
+        std::env::set_var("SNIPER_DAL_LEVEL", "MAXIMUM");
+        assert_eq!(DalLevel::from_env(), DalLevel::Maximum);
+        std::env::remove_var("SNIPER_DAL_LEVEL");
+    }
+
+    #[test]
+    fn test_dal_level_from_env_case_insensitive() {
+        std::env::set_var("SNIPER_DAL_LEVEL", "maximum");
+        assert_eq!(DalLevel::from_env(), DalLevel::Maximum);
+        std::env::remove_var("SNIPER_DAL_LEVEL");
+    }
+
+    #[test]
+    fn test_dal_level_from_env_invalid_defaults_to_baseline() {
+        std::env::set_var("SNIPER_DAL_LEVEL", "garbage");
+        assert_eq!(DalLevel::from_env(), DalLevel::Baseline);
+        std::env::remove_var("SNIPER_DAL_LEVEL");
+    }
+
+    // ---------------------------------------------------------------------------
+    // SniperConfig::from_env() override tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_config_from_env_overrides() {
+        // Save current values
+        let old_timeout = std::env::var("SNIPER_LOCK_TIMEOUT").ok();
+        let old_retention = std::env::var("SNIPER_BACKUP_RETENTION_COUNT").ok();
+        let old_audit = std::env::var("SNIPER_DISABLE_AUDIT").ok();
+
+        std::env::set_var("SNIPER_LOCK_TIMEOUT", "60");
+        std::env::set_var("SNIPER_BACKUP_RETENTION_COUNT", "10");
+        std::env::set_var("SNIPER_DISABLE_AUDIT", "1");
+
+        let config = SniperConfig::from_env();
+        assert_eq!(config.lock_timeout, Duration::from_secs(60));
+        assert_eq!(config.backup_retention_count, 10);
+        assert!(!config.audit_enabled);
+
+        // Restore
+        fn restore(key: &str, val: Option<String>) {
+            match val {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        restore("SNIPER_LOCK_TIMEOUT", old_timeout);
+        restore("SNIPER_BACKUP_RETENTION_COUNT", old_retention);
+        restore("SNIPER_DISABLE_AUDIT", old_audit);
+    }
+
+    #[test]
+    fn test_config_from_env_pid_scales() {
+        std::env::set_var("SNIPER_PID_ENTROPY_SCALE", "2.5");
+        std::env::set_var("SNIPER_PID_PRESSURE_SCALE", "3.0");
+        let config = SniperConfig::from_env();
+        assert_eq!(config.pid_entropy_scale, 2.5);
+        assert_eq!(config.pid_pressure_scale, 3.0);
+        std::env::remove_var("SNIPER_PID_ENTROPY_SCALE");
+        std::env::remove_var("SNIPER_PID_PRESSURE_SCALE");
+    }
 }
