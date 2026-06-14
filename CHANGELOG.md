@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-06-14
+
 ### Fixed
 - **manifest dry-run per-operation diffs:** Added `manifest_ops` field to dry-run JSON output with per-operation diff previews for both insert and delete operations.
 - **auto-indent module docstring bug (BUG-1):** Auto-indent now correctly ignores module-level docstrings when detecting indentation style, preventing 2-space module docstrings from polluting function body indentation.
 - **context hash documentation (BUG-2):** Added `sniper context <file> <start> <end>` CLI command and documented exact SHA-256 computation (3 lines before/after, byte-level including newlines).
 - **dry-run risk telemetry noise (BUG-3):** Removed `risk` and `recommended_action` fields from dry-run JSON output in both `sniper_edit` and `sniper_manifest`.
+- **library extraction incomplete (v0.7.2):** Removed duplicate `diff`/`indent` module declarations from binary; binary now uses library exports. Removed dead `write_atomic_with_guard` function. Python `sniper_undo` now uses atomic temp+rename matching CLI behavior. Python `sniper_encode` delegates to library `hex_encode`.
 
 ### Added
 - **cargo-deny configuration:** Added `deny.toml` with advisory ignore for unmaintained `atty`, license allowlist (MIT, Apache-2.0, MPL-2.0, Unicode-3.0), and bans configured to allow multiple versions.
