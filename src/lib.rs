@@ -45,6 +45,26 @@ use sha2::Digest;
 /// `find_latest_backup`, and `purge_old_backups`.
 pub const BACKUP_DIR: &str = ".sniper";
 
+/// A single operation within a batch manifest.
+///
+/// Used by both the CLI binary and Python bindings to deserialize
+/// manifest JSON. Operations are applied bottom-up (by start line,
+/// descending) so that line numbers in earlier operations remain valid.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ManifestOp {
+    /// 1-based start line (inclusive).
+    pub start: usize,
+    /// 1-based end line (exclusive). Defaults to start if absent.
+    #[serde(default)]
+    pub end: Option<usize>,
+    /// Hex-encoded content to insert at this position.
+    #[serde(default)]
+    pub hex: Option<String>,
+    /// If true, delete the range instead of inserting content.
+    #[serde(default)]
+    pub delete: Option<bool>,
+}
+
 /// Snapshot of memory statistics from a ResourceGuard at a point in time.
 ///
 /// Captures available bytes, used bytes, and pressure percentage.
@@ -374,7 +394,7 @@ pub fn find_latest_backup(filepath: &str) -> Result<Option<PathBuf>, String> {
 /// Writes content to a file atomically using a temporary file and rename.
 ///
 /// Creates an internal ResourceGuard for metabolic pacing. For callers that
-/// already have a guard, use `write_atomic_with_guard` or `write_atomic_with_dal`.
+/// already have a guard, use `write_atomic_with_dal`.
 ///
 /// # Arguments
 /// * `filepath` - Target file path.
@@ -388,46 +408,12 @@ pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
     write_atomic_impl(filepath, lines, has_trailing_newline, &guard)
 }
 
-/// Atomic write gated by a pre-created ResourceGuard.
-///
-/// Performs resource safety check BEFORE any file I/O begins, then delegates
-/// the actual atomic write to `write_atomic_impl`. This ensures resource
-/// exhaustion is detected before the process commits to disk operations.
-///
-/// # Arguments
-/// * `filepath` - Target file path.
-/// * `lines` - Content lines to write.
-/// * `guard` - Pre-created ResourceGuard for resource safety checks.
-/// * `policy` - Optional escalation policy (currently unused; reserved for future blocking checks).
-///
-/// # Returns
-/// `Ok(())` on success. `Err(message)` if resource check fails or write fails.
-///
-/// # Pre-conditions
-/// - `guard` must be a valid, live ResourceGuard.
-///
-/// # Post-conditions
-/// - File at `filepath` contains exactly `lines` if Ok.
-/// - No partial writes remain on error (atomic rename).
-pub fn write_atomic_with_guard(
-    filepath: &str,
-    lines: &[&str],
-    guard: &ResourceGuard,
-    _policy: Option<&()>,
-) -> Result<(), String> {
-    // Gate: resource check BEFORE any I/O (T4 contract C-05)
-    guard.check().map_err(|e| format!("resource safety: {e}"))?;
-
-    let has_trailing_newline = check_trailing_newline(filepath)?;
-    write_atomic_impl(filepath, lines, has_trailing_newline, guard)
-}
-
 /// Atomic write gated by a pre-created ResourceGuard with DAL-level enforcement.
 ///
-/// Like `write_atomic_with_guard` but additionally enforces the configured
-/// Defense-Ascension Level. At `DalLevel::Maximum`, an extra resource check
-/// is performed after the initial gate to confirm resources remain safe
-/// after the first validation.
+/// Performs resource safety check BEFORE any file I/O begins, then delegates
+/// the actual atomic write to `write_atomic_impl`. At `DalLevel::Maximum`,
+/// an extra resource check is performed after the initial gate to confirm
+/// resources remain safe after the first validation.
 ///
 /// # Arguments
 /// * `filepath` - Target file path.
@@ -556,8 +542,8 @@ fn write_atomic_impl<S: AsRef<str>>(
     }
     f.into_inner().map_err(|e| format!("flush: {e}"))?;
     // Metabolic Pacing: PID-configured sleep using the caller's ResourceGuard metrics.
-    // The guard is created by the caller (write_atomic, write_atomic_with_guard,
-    // or write_atomic_with_dal) and shared here to avoid dual-guard divergence.
+    // The guard is created by the caller (write_atomic or write_atomic_with_dal)
+    // and shared here to avoid dual-guard divergence.
     let entropy = guard.raw_entropy();
     let pressure = guard.pressure();
     let config = SniperConfig::from_env();

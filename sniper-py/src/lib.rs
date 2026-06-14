@@ -8,9 +8,9 @@ use llmosafe::ResourceGuard;
 
 use moesniper::{
     auto_indent_content, check_file_size, count_recent_backups, create_backup, find_latest_backup,
-    generate_preview, handle_backtrack_error, hex_decode, needs_indent_fix, normalize_path,
-    purge_old_backups, recommend_from_risk, validate_indentation, verify_context,
-    write_atomic_with_dal, RiskTelemetry, SniperConfig, SniperLock, NAME, VERSION,
+    generate_preview, handle_backtrack_error, hex_decode, hex_encode, needs_indent_fix,
+    normalize_path, purge_old_backups, recommend_from_risk, validate_indentation, verify_context,
+    write_atomic_with_dal, ManifestOp, RiskTelemetry, SniperConfig, SniperLock, NAME, VERSION,
 };
 
 /// Python bindings for moesniper — escape-proof precision file editing.
@@ -442,6 +442,10 @@ fn sniper_manifest(
 
 /// Restore the most recent backup for a file.
 ///
+/// Uses atomic temp+rename to prevent corruption if the process is
+/// interrupted mid-restore. The consumed backup is removed after
+/// successful restore to support consecutive undo operations.
+///
 /// Args:
 ///     filepath (str): Path to the target file.
 ///
@@ -462,8 +466,17 @@ fn sniper_undo(filepath: &str) -> PyResult<String> {
 
     match latest {
         Some(backup_path) => {
-            fs::copy(&backup_path, filepath)
-                .map_err(|e| PyIOError::new_err(format!("restore: {e}")))?;
+            // Atomic restore: copy to temp file, then rename over the target.
+            // This matches the CLI undo behavior — prevents partial writes
+            // if the process is interrupted between copy and rename.
+            let tmp = format!("{}.sniper_undo_tmp", filepath);
+            fs::copy(&backup_path, &tmp)
+                .map_err(|e| PyIOError::new_err(format!("restore (copy to temp): {e}")))?;
+            if let Err(e) = fs::rename(&tmp, filepath) {
+                let _ = fs::remove_file(&tmp);
+                return Err(PyIOError::new_err(format!("restore (rename): {e}")));
+            }
+            // Pop the stack: remove the consumed backup.
             let _ = fs::remove_file(&backup_path);
             Ok(backup_path.to_string_lossy().into())
         }
@@ -475,6 +488,9 @@ fn sniper_undo(filepath: &str) -> PyResult<String> {
 
 /// Hex-encode a string.
 ///
+/// Delegates to the library's optimized hex encoder which uses a
+/// pre-allocated buffer with direct byte-to-nibble mapping.
+///
 /// Args:
 ///     text (str): Content to encode.
 ///
@@ -482,10 +498,7 @@ fn sniper_undo(filepath: &str) -> PyResult<String> {
 ///     str: Hex-encoded version of the input.
 #[pyfunction]
 fn sniper_encode(text: &str) -> String {
-    text.as_bytes()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect()
+    hex_encode(text.as_bytes())
 }
 
 /// Hex-decode a string.
@@ -922,20 +935,4 @@ fn generate_preview_py(
     let dict = PyDict::new(py);
     dict.set_item("preview", preview)?;
     Ok(dict.into())
-}
-
-/// Internal structure for deserializing manifest operations from JSON.
-#[derive(serde::Deserialize)]
-struct ManifestOp {
-    /// 1-based start line (inclusive).
-    start: usize,
-    /// 1-based end line (exclusive). Defaults to start if absent.
-    #[serde(default)]
-    end: Option<usize>,
-    /// Hex-encoded content to insert at this position.
-    #[serde(default)]
-    hex: Option<String>,
-    /// If true, delete the range instead of inserting content.
-    #[serde(default)]
-    delete: Option<bool>,
 }

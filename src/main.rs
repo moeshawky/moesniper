@@ -33,16 +33,12 @@ mod help_text;
 use std::fs;
 use std::io::Read;
 
-mod diff;
-mod indent;
-
-use diff::generate_preview;
-use indent::{auto_indent_content, needs_indent_fix, validate_indentation};
-
 use moesniper::{
-    check_file_size, compute_context_hash, count_recent_backups, create_backup, find_latest_backup,
-    handle_backtrack_error, hex_decode, normalize_path, purge_old_backups, recommend_from_risk,
-    verify_context, write_atomic_with_dal, RiskTelemetry, SniperConfig, SniperLock,
+    auto_indent_content, check_file_size, compute_context_hash, count_recent_backups,
+    create_backup, find_latest_backup, generate_preview, handle_backtrack_error, hex_decode,
+    needs_indent_fix, normalize_path, purge_old_backups, recommend_from_risk,
+    validate_indentation, verify_context, write_atomic_with_dal, ManifestOp, RiskTelemetry,
+    SniperConfig, SniperLock,
 };
 
 use llmosafe::ResourceGuard;
@@ -854,17 +850,6 @@ fn err(msg: String) -> CliResult {
         ai_hint,
         ..Default::default()
     }
-}
-
-#[derive(serde::Deserialize)]
-struct ManifestOp {
-    start: usize,
-    #[serde(default)]
-    end: Option<usize>,
-    #[serde(default)]
-    hex: Option<String>,
-    #[serde(default)]
-    delete: Option<bool>,
 }
 
 #[cfg(test)]
