@@ -230,4 +230,90 @@ mod tests {
         let result = validate_path(&new_file, &policy);
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn test_base_dir_nonexistent_file_inside() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().to_path_buf();
+        let target = base.join("nonexistent.txt");
+
+        let policy = SecurityPolicy {
+            base_dir: Some(base),
+            reject_parent_refs: true,
+        };
+
+        let result = validate_path(&target, &policy);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_base_dir_nonexistent_file_escapes_via_parent_ref() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().to_path_buf();
+        // Create a path that looks like it's in base but escapes it via parent refs
+        // We set reject_parent_refs = false to test the base_dir escape logic specifically
+        let target = base.join("..").join("outside.txt");
+
+        let policy = SecurityPolicy {
+            base_dir: Some(base),
+            reject_parent_refs: false,
+        };
+
+        let result = validate_path(&target, &policy);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PathSecurityError::EscapesBaseDirectory { .. }
+        ));
+    }
+
+    #[test]
+    fn test_base_dir_nonexistent_absolute_path_escapes() {
+        let dir = TempDir::new().unwrap();
+        let base = dir.path().to_path_buf();
+
+        #[cfg(unix)]
+        let target = PathBuf::from("/tmp/some_random_nonexistent_file.txt");
+
+        #[cfg(windows)]
+        let target = PathBuf::from("C:\\temp\\some_random_nonexistent_file.txt");
+
+        let policy = SecurityPolicy {
+            base_dir: Some(base),
+            reject_parent_refs: true,
+        };
+
+        let result = validate_path(&target, &policy);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PathSecurityError::EscapesBaseDirectory { .. }
+        ));
+    }
+
+    #[test]
+    fn test_table_driven_traversal() {
+        let policy = SecurityPolicy::default();
+        let cases = vec![
+            "../etc/passwd",
+            "foo/bar/../../../etc/passwd",
+            "foo/../bar",
+            "../",
+            "..",
+            "a/b/c/..",
+        ];
+
+        for case in cases {
+            let result = validate_path(case, &policy);
+            assert!(result.is_err(), "Expected {} to fail", case);
+            assert!(
+                matches!(
+                    result.unwrap_err(),
+                    PathSecurityError::ParentReferenceNotAllowed { .. }
+                ),
+                "Expected ParentReferenceNotAllowed for {}",
+                case
+            );
+        }
+    }
 }
