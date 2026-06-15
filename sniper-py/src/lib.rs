@@ -482,13 +482,13 @@ fn sniper_manifest(
 ///     filepath (str): Path to the target file.
 ///
 /// Returns:
-///     str: Path to the restored backup on success.
+///     dict: {"status": "ok", "backup_path": str} on success.
 ///
 /// Raises:
 ///     RuntimeError: No backup found, lock acquisition failure.
 ///     IOError: Backup restore failure.
 #[pyfunction]
-fn sniper_undo(filepath: &str) -> PyResult<String> {
+fn sniper_undo(py: Python<'_>, filepath: &str) -> PyResult<PyObject> {
     let config = SniperConfig::from_env();
     let _lock = SniperLock::acquire_with_config(filepath, &config)
         .map_err(|e| PyRuntimeError::new_err(format!("lock acquire: {e}")))?;
@@ -496,7 +496,7 @@ fn sniper_undo(filepath: &str) -> PyResult<String> {
     let latest = find_latest_backup(filepath)
         .map_err(|e| PyRuntimeError::new_err(format!("find backup: {e}")))?;
 
-    match latest {
+    let backup_path = match latest {
         Some(backup_path) => {
             // Atomic restore: copy to temp file, then rename over the target.
             // This matches the CLI undo behavior — prevents partial writes
@@ -510,12 +510,19 @@ fn sniper_undo(filepath: &str) -> PyResult<String> {
             }
             // Pop the stack: remove the consumed backup.
             let _ = fs::remove_file(&backup_path);
-            Ok(backup_path.to_string_lossy().into())
+            backup_path
         }
-        None => Err(PyRuntimeError::new_err(format!(
-            "no backup found for {filepath}"
-        ))),
-    }
+        None => {
+            return Err(PyRuntimeError::new_err(format!(
+                "no backup found for {filepath}"
+            )));
+        }
+    };
+
+    let dict = PyDict::new(py);
+    dict.set_item("status", "ok")?;
+    dict.set_item("backup_path", backup_path.to_string_lossy().into_owned())?;
+    Ok(dict.into())
 }
 
 /// Hex-encode a string.
