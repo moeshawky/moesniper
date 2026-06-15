@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-06-15
+
+### Fixed
+- **auto-indent closing brace over-indentation:** `auto_indent_content` now correctly dedents closing braces (`}`, `)`, `]`) to block level instead of body level.
+- **tabs overhang space-to-tab conversion:** Multi-level space-indented content in tab-indented files now preserves space overhang correctly.
+- **dry-run `.sniper/` directory creation:** Both `cmd_splice` and `cmd_manifest_impl` now gate lock acquisition behind `!dry_run`, preventing persistent `.sniper/` directory creation during dry-run operations.
+- **Python dry-run `.sniper/` leak:** Python bindings (`sniper_edit`, `sniper_manifest`) now gate lock and backup creation behind `!dry_run`, matching CLI behavior.
+- **manifest same-start overlap:** Operations targeting the same line in a manifest now return an error instead of silently overwriting each other.
+- **manifest context hash semantics:** Context hash is now verified once before the manifest loop against pre-manifest file state, instead of per-operation against mutated state.
+- **clock-backwards lock timeout:** `SniperLock::acquire_with_config` now correctly handles clock-backwards events, preventing potential infinite hang.
+- **manifest silent no-op:** Operations with neither `delete` nor `hex` now return an error instead of silently succeeding with zero changes.
+- **Python bounds parity:** Python `sniper_edit` bounds checking now matches CLI behavior for end-of-file insert semantics.
+- **Python error type classification:** `check_file_size_py` now raises `ValueError` for file-too-large errors instead of blanket `PyIOError`.
+- **Python undo response shape:** `sniper_undo` now returns a consistent dict with `status` and `backup_path` keys.
+- **error visibility:** `purge_old_backups` errors are now logged to stderr; lock timeout errors now include PID and lock path.
+- **PidConfig visibility:** Demoted to `pub(crate)` with internal-use documentation.
+- **Cargo.toml:** Added `readme` field for crates.io rendering.
+
+### Added
+- **Bug-hunt test suite:** 66 new tests covering manifest edge cases, auto-indent boundaries, dry-run side effects, and Python parity gaps.
+- **Test protocol gap analysis:** 6 systemic protocol gaps documented (G-SYMMETRY, G-CROSS, G-SIDEFX, G-GUARD, G-DIFF, G-LOCK).
+
+### Changed
+- **`SniperConfig` deduplication:** `cmd_splice` and `cmd_manifest_impl` now use a single `SniperConfig::from_env()` call per operation.
+
 ## [0.7.9] - 2026-06-14
 
 ### Fixed
