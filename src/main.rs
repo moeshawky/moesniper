@@ -2241,12 +2241,9 @@ mod tests {
         let path = create_file(&dir, "mf_noop.txt", "a\nb\nc\n");
         let manifest = r#"[{"start": 1, "end": 1}]"#;
         let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
-        // The operation has no hex and no delete — it's silently skipped
-        assert_eq!(r.status, "ok",
-            "Silent no-op: op with no hex and no delete returns ok. Bug? Status: {}", r.status);
-        let content = read_file(&path);
-        assert_eq!(content, "a\nb\nc\n",
-            "Silent no-op must not modify file. Got: {:?}", content);
+        // The operation has no hex and no delete — now correctly returns error (fixed)
+        assert_eq!(r.status, "error",
+            "Silent no-op: op with no hex and no delete must return error. Fixed. Status: {}", r.status);
         assert_eq!(r.lines_removed, 0, "No lines should be removed in silent no-op");
         assert_eq!(r.lines_inserted, 0, "No lines should be inserted in silent no-op");
     }
