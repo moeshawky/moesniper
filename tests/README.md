@@ -8,7 +8,7 @@ tests/
 ├── unit_edge_cases.rs    # Edge cases: empty files, unicode, long lines, EOF boundaries
 ├── property_invariants.rs # Property-based: encode/decode roundtrip, undo reversibility
 ├── regression/           # Golden-file regression against known outputs
-│   ├── golden_tests.rs
+│   ├── regression_golden.rs
 │   └── golden/
 ├── integration.rs        # End-to-end: concurrency, lock behavior, full workflows
 ├── enterprise_security.rs # Path traversal, symlink attacks, lock integrity, audit
@@ -22,7 +22,7 @@ cargo test                          # All tests
 cargo test --test smoke             # Smoke only (fastest)
 cargo test --test unit_edge_cases   # Edge cases
 cargo test --test property_invariants  # Property-based
-cargo test --test golden_tests      # Golden file regression
+cargo test --test regression_golden      # Golden file regression
 cargo test --test integration       # Integration
 cargo test --test enterprise_security  # Security
 cargo test --test boundary_tests   # Cross-boundary
