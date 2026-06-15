@@ -828,12 +828,19 @@ fn write_atomic_with_dal_py(
 ///     bool: True if file size is within limit.
 ///
 /// Raises:
-///     IOError: File not found or stat error.
+///     ValueError: File exceeds the maximum size limit.
+///     IOError: File not found, stat error, or other I/O error.
 #[pyfunction]
 fn check_file_size_py(filepath: &str, max_size: u64) -> PyResult<bool> {
     check_file_size(filepath, max_size)
         .map(|_| true)
-        .map_err(PyIOError::new_err)
+        .map_err(|msg| {
+            if msg.contains("File too large") {
+                PyValueError::new_err(msg)
+            } else {
+                PyIOError::new_err(msg)
+            }
+        })
 }
 
 /// Normalize a file path (expand ~, resolve symlinks).
