@@ -750,6 +750,10 @@ fn cmd_manifest_impl(
             } else {
                 lines.extend(new);
             }
+        } else {
+            return err(format!(
+                "manifest operation at line {start} must specify either 'delete' or 'hex'"
+            ));
         }
     }
 
