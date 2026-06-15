@@ -724,7 +724,9 @@ impl SniperLock {
                     return Ok(Self { lock_path });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if start.elapsed().unwrap_or(Duration::ZERO) > timeout {
+                    // Safety: if clock moved backwards (elapsed() returns Err),
+                    // treat as immediate timeout to avoid infinite hang.
+                    if start.elapsed().unwrap_or(timeout + Duration::from_secs(1)) > timeout {
                         let holder_pid = fs::read_to_string(&lock_path)
                             .ok()
                             .and_then(|c| c.trim().parse::<u32>().ok());
