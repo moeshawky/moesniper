@@ -1,6 +1,6 @@
 # Publishing moesniper — Success Log & Reference
 
-> This document records the exact steps that successfully published moesniper v0.7.8 to PyPI, TestPyPI, crates.io, and GitHub Releases. Use this as the canonical reference for future releases.
+> This document records the exact steps that successfully published moesniper v0.7.10 to PyPI, TestPyPI, crates.io, and GitHub Releases. Use this as the canonical reference for future releases.
 
 ---
 
@@ -8,14 +8,14 @@
 
 | Registry | Package | Version | Status |
 |----------|---------|---------|--------|
-| **PyPI** | `moesniper` | 0.7.8 | ✅ Published |
-| **TestPyPI** | `moesniper` | 0.7.8 | ✅ Published |
-| **crates.io** | `moesniper` | 0.7.8 | ✅ Published |
-| **GitHub Release** | `moesniper` | v0.7.8 | ✅ Created |
+| **PyPI** | `moesniper` | 0.7.10 | ✅ Published |
+| **TestPyPI** | `moesniper` | 0.7.10 | ✅ Published |
+| **crates.io** | `moesniper` | 0.7.10 | ✅ Published |
+| **GitHub Release** | `moesniper` | v0.7.10 | ✅ Created |
 
 **Wheels built:**
-- `moesniper-0.7.8-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl`
-- `moesniper-0.7.8-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl`
+- `moesniper-0.7.10-cp312-cp312-linux_x86_64.whl`
+- `moesniper-0.7.10.tar.gz`
 
 ---
 
@@ -168,4 +168,4 @@ gh release create vX.Y.Z --generate-notes
 
 ---
 
-*Last successful release: v0.7.8 (2026-06-13)*
+*Last successful release: v0.7.10 (2026-06-15)*
