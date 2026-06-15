@@ -156,8 +156,11 @@ fn sigmoid_f64(x: f64) -> f64 {
 /// The formula is: `base_ms + (entropy * entropy_scale) + (pressure * pressure_scale)`.
 ///
 /// Defaults produce zero sleep when entropy is low, scaling up with system load.
+///
+/// **Internal use only** — constructed by [`write_atomic_impl`] from [`SniperConfig`].
+/// Not part of the public API surface; exposed as `pub(crate)` for test access.
 #[derive(Debug, Clone)]
-pub struct PidConfig {
+pub(crate) struct PidConfig {
     /// Base sleep duration in milliseconds (always applied).
     pub base_ms: u64,
     /// Multiplier for entropy score (0-1000) to produce milliseconds.
@@ -360,11 +363,11 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
         }
     }
 
-    // Delete marked backups
-    for path in to_delete {
-        let _ = fs::remove_file(path);
-        if config.audit_enabled {
-            eprintln!("[SNIPER-AUDIT] Purged old backup: {:?}", path);
+    // Delete marked backups — always log activity (audit_enabled is additive, not gating)
+    for path in &to_delete {
+        match fs::remove_file(path) {
+            Ok(()) => eprintln!("[SNIPER] Purged old backup: {:?}", path),
+            Err(e) => eprintln!("[SNIPER] Failed to purge backup {:?}: {e}", path),
         }
     }
 
@@ -522,7 +525,12 @@ fn write_atomic_impl<S: AsRef<str>>(
 
     if let Ok(metadata) = fs::metadata(filepath) {
         let perms = metadata.permissions();
-        let _ = fs::set_permissions(&tmp, perms);
+        if let Err(e) = fs::set_permissions(&tmp, perms) {
+            eprintln!(
+                "[SNIPER] Warning: failed to preserve file permissions for {:?}: {e}",
+                filepath
+            );
+        }
     }
 
     let mut f = std::io::BufWriter::new(f);
@@ -717,17 +725,22 @@ impl SniperLock {
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     if start.elapsed().unwrap_or(Duration::ZERO) > timeout {
-                        if let Ok(content) = fs::read_to_string(&lock_path) {
-                            if let Ok(pid) = content.trim().parse::<u32>() {
-                                if !is_process_alive(pid) {
-                                    let _ = fs::remove_file(&lock_path);
-                                    continue;
-                                }
+                        let holder_pid = fs::read_to_string(&lock_path)
+                            .ok()
+                            .and_then(|c| c.trim().parse::<u32>().ok());
+                        if let Some(pid) = holder_pid {
+                            if !is_process_alive(pid) {
+                                let _ = fs::remove_file(&lock_path);
+                                continue;
                             }
                         }
                         return Err(format!(
-                            "timeout: another sniper process is editing {} (lock held for >{:?})",
-                            filepath, timeout
+                            "timeout: another sniper process (PID {}) is editing {} \
+                             (lock held for >{:?}; lock file: {:?})",
+                            holder_pid.map_or("unknown".to_string(), |p| p.to_string()),
+                            filepath,
+                            timeout,
+                            lock_path
                         ));
                     }
                     thread::sleep(check_interval);

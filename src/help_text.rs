@@ -62,6 +62,10 @@ MANIFEST FORMAT:
     Operations apply bottom-up (highest line first).
     Line numbers are 1-indexed.
 
+    When --context is used with a manifest, the hash is verified against
+    the file state BEFORE any operation is applied (pre-manifest entry gate).
+    This is a once-at-entry check — it does not re-verify between operations.
+
 BACKUPS:
     Every edit creates a backup in .sniper/
     Use --undo to restore the previous version.

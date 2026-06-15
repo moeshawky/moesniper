@@ -462,7 +462,7 @@ fn cmd_splice(
     // Compute risk telemetry for both dry-run and real paths
     let guard = ResourceGuard::auto(0.5);
     let risk = RiskTelemetry::from_guard(&guard);
-    let config_for_dal = SniperConfig::from_env();
+    // Reuse the config from above instead of re-reading env (F7)
 
     if dry_run {
         let ai_hint = Some(if is_delete {
@@ -503,8 +503,8 @@ fn cmd_splice(
 
     let lines_refs: Vec<&str> = modified_lines.iter().map(|s| s.as_str()).collect();
 
-    // Use pre-computed guard, risk, and config_for_dal from above
-    if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, config_for_dal.dal_level) {
+    // Use pre-computed guard, risk, and dal_level from config above
+    if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, config.dal_level) {
         return err(e);
     }
 
@@ -620,6 +620,18 @@ fn cmd_manifest_impl(
     // Sort bottom-up
     ops.sort_by_key(|b| std::cmp::Reverse(b.start));
 
+    // Guard: overlapping same-start operations cause silent data loss.
+    // Bottom-up processing assumes each op targets a distinct line range;
+    // two ops at the same start line would corrupt each other's output.
+    for i in 1..ops.len() {
+        if ops[i].start == ops[i - 1].start {
+            return err(format!(
+                "overlapping manifest operations at line {}",
+                ops[i].start
+            ));
+        }
+    }
+
     let bk = if !dry_run {
         match create_backup(filepath) {
             Ok(b) => Some(b),
@@ -628,6 +640,18 @@ fn cmd_manifest_impl(
     } else {
         None
     };
+    // Context verification: for manifest mode, verify the hash ONCE
+    // against the pre-manifest file state (before any operation mutates lines).
+    // This is a pre-manifest entry gate, not per-operation verification.
+    if let Some(expected) = context_hash {
+        if let Some(first_op) = ops.first() {
+            let first_end = first_op.end.unwrap_or(first_op.start);
+            if let Err(e) = verify_context(&lines, first_op.start, first_end, expected) {
+                return err(e);
+            }
+        }
+    }
+
     let mut total_removed = 0usize;
     let mut total_inserted = 0usize;
     // Collect per-operation diffs for dry-run
@@ -672,13 +696,6 @@ fn cmd_manifest_impl(
                 Ok(c) => c,
                 Err(e) => return err(format!("hex decode: {e}")),
             };
-
-            // Context verification before applying operation
-            if let Some(expected) = context_hash {
-                if let Err(e) = verify_context(&lines, op.start, actual_e, expected) {
-                    return err(e);
-                }
-            }
 
             // Apply auto-indent if needed
             let final_content =
@@ -739,13 +756,13 @@ fn cmd_manifest_impl(
     let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
     // Compute risk telemetry for both dry-run and real paths
     let guard = ResourceGuard::auto(0.5);
+    // Reuse config from function scope instead of re-reading env (F7)
     let risk = RiskTelemetry::from_guard(&guard);
-    let config_for_dal = SniperConfig::from_env();
 
     if !dry_run {
         // T6: Use write_atomic_with_dal with guard
         if let Err(e) =
-            write_atomic_with_dal(filepath, &lines_refs, &guard, config_for_dal.dal_level)
+            write_atomic_with_dal(filepath, &lines_refs, &guard, config.dal_level)
         {
             return err(e);
         }
@@ -1406,6 +1423,15 @@ mod tests {
             line_num in 1usize..5
         ) {
             let dir = TempDir::new().unwrap();
+            // CWD isolation: chdir to temp dir so .sniper/ is created there, not in project root
+            let original_cwd = std::env::current_dir().unwrap();
+            let _cwd_guard = {
+                struct Guard(PathBuf);
+                impl Drop for Guard { fn drop(&mut self) { let _ = std::env::set_current_dir(&self.0); } }
+                let g = Guard(original_cwd);
+                std::env::set_current_dir(dir.path()).unwrap();
+                g
+            };
             let path = create_file(&dir, "prop_undo_test.txt", &content);
             let original = read_file(&path);
             let lines: Vec<&str> = original.lines().collect();
@@ -2217,15 +2243,9 @@ mod tests {
         assert_eq!(r.lines_inserted, 0, "No lines should be inserted in silent no-op");
     }
 
-    /// BUG PROBE: two manifest ops at same start line (DATA CORRUPTION FOUND)
-    /// When two ops target the same line, the second op operates on the state
-    /// AFTER the first op has mutated it. This causes silent data loss.
-    ///
-    /// Input:  a\nb\nc\nd\ne\n (5 lines)
-    /// Op 1:   delete line 3 → removes 'c' → a\nb\nd\ne\n (4 lines)
-    /// Op 2:   insert at line 3 → replaces 'd' with 'X' → a\nb\nX\ne\n (4 lines)
-    /// Expected by user: a\nb\nX\nd\ne\n (5 lines — c→X, d preserved)
-    /// Actual result:    a\nb\nX\ne\n (4 lines — 'd' SILENTLY LOST)
+    /// BUG PROBE: two manifest ops at same start line (NOW REJECTED WITH ERROR)
+    /// After F5 fix: same-start operations are detected and rejected with a clear
+    /// error before any mutation occurs. This prevents silent data loss.
     #[test]
     fn bug_probe_manifest_same_start_overlap() {
         let dir = TempDir::new().unwrap();
@@ -2235,55 +2255,34 @@ mod tests {
             {"start": 3, "end": 3, "hex": "58"}
         ]"#;
         let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
-        let content = read_file(&path);
-        eprintln!("BUG PROBE: same-start manifest result content: {:?}", content);
-
-        // With stable sort preserving original order:
-        // Op1 (delete line 3, 'c'): removes index 2 → lines become [a,b,d,e]
-        // Op2 (insert at line 3, 'X'): splices at index 2..3, overwriting 'd'
-        // Result: "a\nb\nX\ne\n" — 4 lines, 'd' is SILENTLY LOST
-        //
-        // This is a DATA CORRUPTION bug. The user intended to:
-        //   1. Delete 'c' at line 3
-        //   2. Insert 'X' at line 3
-        // Which should produce: a, b, X, d, e (5 lines)
-        // Instead: a, b, X, e (4 lines, 'd' overwritten by X)
-        assert_eq!(content, "a\nb\nX\ne\n",
-            "BUG CONFIRMED: same-start manifest ops cause silent data loss.\n\
-             Expected 'a\\nb\\nX\\nd\\ne\\n' (5 lines) but got {:?} (4 lines).\n\
-             Line 'd' was silently overwritten by 'X'.", content);
+        // F5 fix: same-start operations now produce an error, not silent corruption
+        assert_eq!(r.status, "error",
+            "Expected error for same-start manifest ops, got status={}", r.status);
+        assert!(r.message.as_deref().unwrap().contains("overlapping manifest operations"),
+            "Expected 'overlapping manifest operations' error, got: {:?}", r.message);
     }
 
-    /// BUG PROBE: manifest context verification uses MUTATED state for multi-op
-    /// The context_hash parameter is checked against &lines inside the op loop.
-    /// After op1 modifies lines, op2's context verification sees the mutated state,
-    /// which almost certainly doesn't match the original context hash.
-    /// CRITICAL: The SAME context_hash is reused for ALL operations — this means
-    /// if the hash was computed for op1's range, it will NOT match op2's range.
-    /// This test explicitly verifies whether this contract violation is caught.
+    /// BUG PROBE: manifest context verification now uses pre-loop gate (F6 FIX)
+    /// After F6 fix: context_hash is verified ONCE before the operation loop
+    /// against the pre-manifest file state. For multi-op manifests, the first
+    /// operation (bottom-up) is used as the verification window. This is a
+    /// pre-manifest entry gate, not per-operation verification.
+    ///
+    /// This test verifies that the hash computed for line 6 (first op after
+    /// bottom-up sort) correctly passes the pre-manifest gate.
     #[test]
-    fn bug_probe_manifest_context_per_op_mutated_state() {
+    fn bug_probe_manifest_context_pre_loop_gate() {
         let dir = TempDir::new().unwrap();
         let content = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\n";
-        let path = create_file(&dir, "mf_ctx_mut.txt", content);
+        let path = create_file(&dir, "mf_ctx_gate.txt", content);
 
-        // Compute context hash for operation at LINE 6
+        // Compute context hash for the first operation (line 6, bottom-up)
         let lines: Vec<String> = content.split_inclusive('\n').map(String::from).collect();
-        let ctx_hash_for_line6 = moesniper::compute_context_hash(&lines, 6, 6);
-        let short_hash_for_6 = &ctx_hash_for_line6[..16];
+        let ctx_hash = moesniper::compute_context_hash(&lines, 6, 6);
+        let short_hash = &ctx_hash[..16];
 
-        // Compute context hash for operation at LINE 3 (different range)
-        let ctx_hash_for_line3 = moesniper::compute_context_hash(&lines, 3, 3);
-
-        // Verify: hash for line 6 != hash for line 3 (different context windows)
-        assert_ne!(ctx_hash_for_line6, ctx_hash_for_line3,
-            "Context hashes for different lines MUST differ");
-
-        // Now: manifest with TWO operations, using hash for line 6
-        // Bottom-up sort processes start=6 first (its hash should match)
-        // Then start=3 is processed — but the expected hash is still for line 6!
-        // Since the lines around line 3 differ from lines around line 6,
-        // the verification for start=3 SHOULD fail.
+        // Manifest with TWO operations. Bottom-up: start=6 processes first.
+        // The pre-loop gate verifies hash against the first op (start=6).
         let manifest = format!(
             r#"[
                 {{"start": 3, "end": 3, "hex": "4e455731"}},
@@ -2291,30 +2290,11 @@ mod tests {
             ]"#
         );
 
-        let r = cmd_manifest_impl(&path, &manifest, false, false, false, Some(short_hash_for_6));
-        // BUG: The SAME context_hash is used for ALL operations.
-        // Bottom-up: op at start=6 processes first — hash matches. ✓
-        // Then op at start=3 processes — hash for line 6 is used, but
-        // verify_context computes hash for lines around line 3. These differ!
-        // EXPECTED: This should FAIL with "context mismatch"
-        // ACTUAL: Document what actually happens
-        eprintln!("BUG PROBE: manifest multi-op context result: status={}, msg={:?}",
-            r.status, r.message);
-
-        if r.status == "ok" {
-            // BUG CONFIRMED: context verification allowed a mismatched hash through
-            // This means either:
-            // (a) context verification is not running for multi-op manifests, OR
-            // (b) the hash coincidentally matched (extremely unlikely)
-            panic!(
-                "BUG FOUND: Manifest context verification passed for mismatched hash!\n\
-                 Hash was computed for line 6 but operation at line 3 succeeded.\n\
-                 This means context verification is broken for multi-op manifests."
-            );
-        }
-        // If we reach here (status=error), the context verification correctly caught the mismatch
-        assert!(r.message.as_deref().unwrap().contains("context mismatch"),
-            "Expected context mismatch, got: {:?}", r.message);
+        let r = cmd_manifest_impl(&path, &manifest, false, false, false, Some(short_hash));
+        // F6 fix: pre-manifest gate verifies against first op (start=6), hash matches → ok
+        assert_eq!(r.status, "ok",
+            "Pre-manifest context gate should pass (hash matches first op). \
+             Status={}, msg={:?}", r.status, r.message);
     }
 
     /// BUG PROBE: single-op manifest context verification should work correctly

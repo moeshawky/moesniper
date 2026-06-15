@@ -95,22 +95,25 @@ fn sniper_edit(
     let result = (|| -> Result<_, String> {
         normalize_path(filepath)?;
         check_file_size(filepath, config.max_file_size)?;
-        let _lock = SniperLock::acquire_with_config(filepath, &config)?;
+        // Gate lock behind dry_run: dry-run reads should not create .sniper/
+        let _lock: Option<SniperLock> = if !dry_run.unwrap_or(false) {
+            Some(SniperLock::acquire_with_config(filepath, &config)?)
+        } else {
+            None
+        };
 
         let text = fs::read_to_string(filepath).map_err(|e| format!("read {filepath}: {e}"))?;
         let lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
-        if start < 1 || start > lines.len() + 1 {
-            return Err(format!(
-                "start line {start} out of bounds (file has {} lines)",
-                lines.len()
-            ));
-        }
-        if end < start || end > lines.len() + 1 {
-            return Err(format!(
-                "end line {end} out of bounds (file has {} lines)",
-                lines.len()
-            ));
+        if start < 1 || end > lines.len() || start > end + 1 {
+            if start == lines.len() + 1 && (start == end + 1 || start == end) {
+                // Allow inserting at end (same parity as CLI)
+            } else {
+                return Err(format!(
+                    "line range {start}-{end} out of bounds (file has {} lines)",
+                    lines.len()
+                ));
+            }
         }
 
         // Context verification: reject if surrounding code has changed
@@ -152,7 +155,12 @@ fn sniper_edit(
             }
         }
 
-        let bk = create_backup(filepath)?;
+        // Gate backup behind dry_run: dry-run should not create .sniper/ backups
+        let bk = if !dry_run.unwrap_or(false) {
+            create_backup(filepath)?
+        } else {
+            String::new()
+        };
 
         let mut modified = lines;
         let new_lines_len = new_lines.len();
@@ -302,7 +310,12 @@ fn sniper_manifest(
     let result = (|| -> Result<_, String> {
         normalize_path(filepath)?;
         check_file_size(filepath, config.max_file_size)?;
-        let _lock = SniperLock::acquire_with_config(filepath, &config)?;
+        // Gate lock behind dry_run: dry-run reads should not create .sniper/
+        let _lock: Option<SniperLock> = if !dry_run.unwrap_or(false) {
+            Some(SniperLock::acquire_with_config(filepath, &config)?)
+        } else {
+            None
+        };
 
         let mut ops: Vec<ManifestOp> =
             serde_json::from_str(operations_json).map_err(|e| format!("parse JSON: {e}"))?;
@@ -318,6 +331,18 @@ fn sniper_manifest(
 
         ops.sort_by_key(|b| std::cmp::Reverse(b.start));
 
+        // Guard: overlapping same-start operations cause silent data loss.
+        // Bottom-up processing assumes each op targets a distinct line range;
+        // two ops at the same start line would corrupt each other's output.
+        for i in 1..ops.len() {
+            if ops[i].start == ops[i - 1].start {
+                return Err(format!(
+                    "overlapping manifest operations at line {}",
+                    ops[i].start
+                ));
+            }
+        }
+
         let bk = if !dry_run.unwrap_or(false) {
             create_backup(filepath)?
         } else {
@@ -325,6 +350,15 @@ fn sniper_manifest(
         };
         let mut total_removed = 0usize;
         let mut total_inserted = 0usize;
+
+        // Context verification: for manifest mode, verify the hash ONCE
+        // against the pre-manifest file state (before any operation mutates lines).
+        if let Some(expected) = context_hash {
+            if let Some(first_op) = ops.first() {
+                let first_end = first_op.end.unwrap_or(first_op.start);
+                verify_context(&lines, first_op.start, first_end, expected)?;
+            }
+        }
 
         for op in &ops {
             let s = op.start;
@@ -354,10 +388,6 @@ fn sniper_manifest(
                     .count();
                 total_removed += removed;
             } else if let Some(ref hex) = op.hex {
-                if let Some(expected) = context_hash {
-                    verify_context(&lines, op.start, actual_e, expected)?;
-                }
-
                 let decoded = hex_decode(hex)?;
 
                 // Apply auto-indent if needed (mirrors CLI cmd_manifest_impl)
