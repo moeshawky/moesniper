@@ -509,7 +509,9 @@ fn cmd_splice(
     }
 
     // Purge old backups according to retention policy
-    let _ = purge_old_backups(filepath, &config);
+    if let Err(e) = purge_old_backups(filepath, &config) {
+        eprintln!("[SNIPER] Backup purge warning: {e}");
+    }
 
     let manifest_promotion = count_recent_backups(filepath, config.lock_timeout.as_secs())
         .map(|count| count >= 3)
@@ -770,7 +772,9 @@ fn cmd_manifest_impl(
         {
             return err(e);
         }
-        let _ = purge_old_backups(filepath, &config);
+        if let Err(e) = purge_old_backups(filepath, &config) {
+            eprintln!("[SNIPER] Backup purge warning: {e}");
+        }
 
         let ai_hint = Some(format!(
             "verify: read {} around line {}",
