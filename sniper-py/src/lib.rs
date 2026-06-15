@@ -916,7 +916,7 @@ fn count_recent_backups_py(filepath: &str, window_secs: u64) -> PyResult<usize> 
 ///     max_age_days (int): Maximum age in days.
 ///
 /// Returns:
-///     int: Number of backups purged.
+///     int: Always returns 0 (TODO: count not yet exposed by underlying library).
 ///
 /// Raises:
 ///     IOError: Purge failed.
