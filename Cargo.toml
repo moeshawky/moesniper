@@ -11,6 +11,7 @@ license = "MIT"
 keywords = ["editor", "llm", "agent", "hex", "code"]
 categories = ["command-line-utilities", "development-tools"]
 repository = "https://github.com/moeshawky/moesniper"
+readme = "README.md"
 rust-version = "1.87"
 exclude = [".moegraph/", "deny.toml"]
 
