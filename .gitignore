@@ -64,3 +64,4 @@ __pycache__/
 deny.toml
 .moegraph/
 publishing.md
+sniper-py/.venv/

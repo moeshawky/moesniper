@@ -524,7 +524,7 @@ fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
     Ok(last_byte[0] == b'\n')
 }
 
-/// Unified atomic write with metabolic pacing via llmosafe 0.7.5.
+/// Unified atomic write with metabolic pacing via llmosafe 0.7.7.
 ///
 /// Trailing newlines are stripped from each line, then:
 /// - All lines except the last get a newline appended

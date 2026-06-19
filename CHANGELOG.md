@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.12] - 2026-06-19
+
+### Changed
+- **llmosafe upgraded to 0.7.7:** Bumped dependency version across Rust crates and Python bindings; updated version strings in help text and docstrings.
+
 ## [0.7.11] - 2026-06-19
 
 ### Fixed

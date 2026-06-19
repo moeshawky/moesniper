@@ -1,6 +1,6 @@
 [package]
 name = "sniper-py"
-version = "0.7.11"
+version = "0.7.12"
 edition = "2021"
 description = "Python bindings for moesniper — escape-proof precision file editing."
 license = "MIT"
@@ -16,4 +16,4 @@ moesniper = { path = ".." }
 pyo3 = { version = "0.23", features = ["extension-module"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-llmosafe = "0.7.5"
+llmosafe = "0.7.7"
