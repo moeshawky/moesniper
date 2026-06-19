@@ -73,7 +73,9 @@ pub struct ManifestOp {
 pub struct MemoryStats {
     /// Total system memory in bytes.
     pub available_bytes: u64,
-    /// Memory currently used by the process in bytes.
+    /// Pressure-derived memory estimate: ceiling (system_mem / 2) scaled by
+    /// pressure percentage. The ceiling reflects ResourceGuard's internal
+    /// memory cap (llmosafe's `memory_ceiling_bytes`).
     pub used_bytes: u64,
     /// Resource pressure as a percentage (0-100).
     pub pressure: u8,
@@ -301,8 +303,8 @@ pub fn create_backup(filepath: &str) -> Result<String, String> {
 
     let name = normalized
         .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
+        .and_then(|n| n.to_str().map(String::from))
+        .unwrap_or_else(|| hash.clone());
 
     let ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -530,7 +532,7 @@ fn write_atomic_impl<S: AsRef<str>>(
     let ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_nanos())
-        .unwrap_or(0);
+        .map_err(|e| format!("timestamp: {e}"))?;
     let tmp = format!("{filepath}.sniper_tmp.{ts}");
 
     struct CleanupGuard<'a> {
@@ -770,13 +772,11 @@ impl SniperLock {
                                 continue;
                             }
                         }
+                        let pid_str = holder_pid.map_or("unknown".to_string(), |p| p.to_string());
                         return Err(format!(
-                            "timeout: another sniper process (PID {}) is editing {} \
-                             (lock held for >{:?}; lock file: {:?})",
-                            holder_pid.map_or("unknown".to_string(), |p| p.to_string()),
-                            filepath,
-                            timeout,
-                            lock_path
+                            "timeout: another sniper process (PID {pid_str}) is editing {filepath} \
+                             (lock held for >{timeout:?}; lock file: {lock_path:?}; \
+                             to recover: kill PID {pid_str} or remove {lock_path:?})"
                         ));
                     }
                     thread::sleep(check_interval);
@@ -941,6 +941,12 @@ mod tests {
     #[test]
     fn test_purge_old_backups_by_count() {
         use std::thread;
+
+        let _serial = CWD_MUTEX.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        let _cwd_guard = CwdGuard::new(original_cwd);
+        std::env::set_current_dir(dir.path()).unwrap();
 
         let file = PathBuf::from("test_purge_backup.txt");
         fs::write(&file, "v0").unwrap();
@@ -1135,7 +1141,6 @@ mod tests {
     /// Test RiskTelemetry::from_guard with known entropy and pressure.
     #[test]
     fn test_risk_telemetry_from_guard() {
-        use std::usize;
         let guard = ResourceGuard::for_testing(usize::MAX / 2, 500, 50);
         let telemetry = RiskTelemetry::from_guard(&guard);
 
@@ -1537,8 +1542,11 @@ mod tests {
         for i in 1..=3 {
             let backup_name = format!("{}.test_age_purge.txt.{}", hash, i * 1000);
             let backup_path = PathBuf::from(BACKUP_DIR).join(&backup_name);
-            fs::File::create(&backup_path)
-                .unwrap_or_else(|e| panic!("create backup {}: {}", backup_name, e));
+            #[allow(clippy::panic)]
+            {
+                fs::File::create(&backup_path)
+                    .unwrap_or_else(|e| panic!("create backup {backup_name}: {e}"));
+            }
         }
 
         // 36500 days ≈ 100 years — nothing should be old enough

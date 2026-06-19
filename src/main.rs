@@ -428,14 +428,14 @@ fn cmd_splice(
     let mut indent_warning = None;
 
     if !is_delete {
-        if auto_indent && needs_indent_fix(&lines, start, end, content) {
-            let fixed = auto_indent_content(&lines, start, end, content);
+        if auto_indent && needs_indent_fix(&lines, start, content) {
+            let fixed = auto_indent_content(&lines, start, content);
             new_lines = fixed.split_inclusive('\n').map(String::from).collect();
             indent_fixed = Some(true);
         }
 
         if !force_indent {
-            let (valid, warning, _suggested) = validate_indentation(&lines, start, end, &new_lines);
+            let (valid, warning, _suggested) = validate_indentation(&lines, start, &new_lines);
             if !valid {
                 indent_warning = warning.clone();
                 if !dry_run {
@@ -459,11 +459,6 @@ fn cmd_splice(
         None
     };
 
-    // Compute risk telemetry for both dry-run and real paths
-    let guard = ResourceGuard::auto(0.5);
-    let risk = RiskTelemetry::from_guard(&guard);
-    // Reuse the config from above instead of re-reading env (F7)
-
     if dry_run {
         let ai_hint = Some(if is_delete {
             format!("verify: {} around line {}", filepath, start)
@@ -485,6 +480,10 @@ fn cmd_splice(
             ..Default::default()
         };
     }
+
+    // Compute risk telemetry for real edit path only — dry_run doesn't need it
+    let guard = ResourceGuard::auto(0.5);
+    let risk = RiskTelemetry::from_guard(&guard);
 
     let bk = match create_backup(filepath) {
         Ok(b) => b,
@@ -700,12 +699,11 @@ fn cmd_manifest_impl(
             };
 
             // Apply auto-indent if needed
-            let final_content =
-                if auto_indent && needs_indent_fix(&lines, op.start, actual_e, &content) {
-                    auto_indent_content(&lines, op.start, actual_e, &content)
-                } else {
-                    content
-                };
+            let final_content = if auto_indent && needs_indent_fix(&lines, op.start, &content) {
+                auto_indent_content(&lines, op.start, &content)
+            } else {
+                content
+            };
 
             // Validate indentation if requested
             if !force_indent {
@@ -714,7 +712,7 @@ fn cmd_manifest_impl(
                     .map(String::from)
                     .collect();
                 let (valid, warning, _) =
-                    validate_indentation(&lines, op.start, actual_e, &new_lines_for_check);
+                    validate_indentation(&lines, op.start, &new_lines_for_check);
                 if !valid && !dry_run {
                     return CliResult {
                         status: "error".into(),
@@ -760,12 +758,12 @@ fn cmd_manifest_impl(
     }
 
     let lines_refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-    // Compute risk telemetry for both dry-run and real paths
-    let guard = ResourceGuard::auto(0.5);
-    // Reuse config from function scope instead of re-reading env (F7)
-    let risk = RiskTelemetry::from_guard(&guard);
 
     if !dry_run {
+        let guard = ResourceGuard::auto(0.5);
+        let risk = RiskTelemetry::from_guard(&guard);
+        // Reuse config from function scope instead of re-reading env (F7)
+
         // T6: Use write_atomic_with_dal with guard
         if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, &config) {
             return err(e);
@@ -803,14 +801,8 @@ fn cmd_manifest_impl(
         ops.first().map(|o| o.start).unwrap_or(1)
     ));
 
-    let recommended_action = if dry_run {
-        None
-    } else {
-        Some(recommend_from_risk(&risk))
-    };
-
     CliResult {
-        status: if dry_run { "dry_run" } else { "ok" }.into(),
+        status: "dry_run".into(),
         file: Some(filepath.into()),
         lines_removed: total_removed,
         lines_inserted: total_inserted,
@@ -819,9 +811,9 @@ fn cmd_manifest_impl(
         ai_hint,
         backup: bk,
         line_shift: Some(total_inserted as i64 - total_removed as i64),
-        risk: if dry_run { None } else { Some(risk) },
-        recommended_action,
-        manifest_ops: if dry_run { Some(manifest_ops) } else { None },
+        risk: None,
+        recommended_action: None,
+        manifest_ops: Some(manifest_ops),
         ..Default::default()
     }
 }
@@ -2462,12 +2454,11 @@ mod tests {
 
         // Manifest with TWO operations. Bottom-up: start=6 processes first.
         // The pre-loop gate verifies hash against the first op (start=6).
-        let manifest = format!(
-            r#"[
-                {{"start": 3, "end": 3, "hex": "4e455731"}},
-                {{"start": 6, "end": 6, "hex": "4e455732"}}
+        let manifest = r#"[
+                {"start": 3, "end": 3, "hex": "4e455731"},
+                {"start": 6, "end": 6, "hex": "4e455732"}
             ]"#
-        );
+        .to_string();
 
         let r = cmd_manifest_impl(&path, &manifest, false, false, false, Some(short_hash));
         // F6 fix: pre-manifest gate verifies against first op (start=6), hash matches → ok
@@ -2491,7 +2482,7 @@ mod tests {
         let short_hash = &ctx_hash[..16];
 
         // Single operation — context verification should match
-        let manifest = format!(r#"[{{"start": 3, "end": 3, "hex": "4e4557"}}]"#);
+        let manifest = r#"[{"start": 3, "end": 3, "hex": "4e4557"}]"#.to_string();
         let r = cmd_manifest_impl(&path, &manifest, false, false, false, Some(short_hash));
         assert_eq!(
             r.status, "ok",

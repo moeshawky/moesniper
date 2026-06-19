@@ -133,8 +133,8 @@ fn sniper_edit(
             String::new()
         } else {
             let mut c = content.to_string();
-            if auto_indent.unwrap_or(false) && needs_indent_fix(&lines, start, end, &c) {
-                c = auto_indent_content(&lines, start, end, &c);
+            if auto_indent.unwrap_or(false) && needs_indent_fix(&lines, start, &c) {
+                c = auto_indent_content(&lines, start, &c);
             }
             c
         };
@@ -150,7 +150,7 @@ fn sniper_edit(
 
         // Indentation validation (skip if force_indent or dry_run)
         if !force_indent.unwrap_or(false) && !dry_run.unwrap_or(false) && !new_lines.is_empty() {
-            let (valid, _, _warning) = validate_indentation(&lines, start, end, &new_lines);
+            let (valid, _, _warning) = validate_indentation(&lines, start, &new_lines);
             if !valid {
                 return Err("indentation validation failed: replacement content indent does not match surrounding context".to_string());
             }
@@ -207,7 +207,9 @@ fn sniper_edit(
             dict.set_item("lines_removed", removed)?;
             dict.set_item("lines_inserted", inserted)?;
             dict.set_item("total_lines", total)?;
-            dict.set_item("backup_path", bk)?;
+            if !bk.is_empty() {
+                dict.set_item("backup_path", bk)?;
+            }
 
             if let Some(ref preview_str) = preview {
                 dict.set_item("diff_preview", preview_str)?;
@@ -393,9 +395,9 @@ fn sniper_manifest(
 
                 // Apply auto-indent if needed (mirrors CLI cmd_manifest_impl)
                 let final_content = if auto_indent.unwrap_or(false)
-                    && needs_indent_fix(&lines, op.start, actual_e, &decoded)
+                    && needs_indent_fix(&lines, op.start, &decoded)
                 {
-                    auto_indent_content(&lines, op.start, actual_e, &decoded)
+                    auto_indent_content(&lines, op.start, &decoded)
                 } else {
                     decoded
                 };
@@ -407,7 +409,7 @@ fn sniper_manifest(
                         .map(String::from)
                         .collect();
                     let (valid, warning, _) =
-                        validate_indentation(&lines, op.start, actual_e, &new_lines_for_check);
+                        validate_indentation(&lines, op.start, &new_lines_for_check);
                     if !valid {
                         return Err(format!(
                             "indentation validation failed at line {}: {}",
@@ -450,7 +452,9 @@ fn sniper_manifest(
             dict.set_item("lines_inserted", inserted)?;
             dict.set_item("total_lines", total)?;
             dict.set_item("operations", count)?;
-            dict.set_item("backup_path", bk)?;
+            if !bk.is_empty() {
+                dict.set_item("backup_path", bk)?;
+            }
 
             let risk_json = serde_json::to_string(&risk).unwrap_or_default();
             dict.set_item("risk", risk_json)?;
@@ -628,7 +632,6 @@ fn version_py(py: Python<'_>) -> PyResult<Py<PyDict>> {
 /// Args:
 ///     filepath (str): Path to the target file.
 ///     start (int): Start line of the edit range (1-based).
-///     end (int): End line of the edit range (1-based).
 ///     content (str): The content to validate.
 ///
 /// Returns:
@@ -643,7 +646,6 @@ fn validate_indentation_py(
     py: Python<'_>,
     filepath: &str,
     start: usize,
-    end: usize,
     content: &str,
 ) -> PyResult<Py<PyDict>> {
     let lines: Vec<String> = split_file_lines(
@@ -652,7 +654,7 @@ fn validate_indentation_py(
     );
     let content_lines: Vec<String> = split_file_lines(content);
 
-    let (valid, msg, detail) = validate_indentation(&lines, start, end, &content_lines);
+    let (valid, msg, detail) = validate_indentation(&lines, start, &content_lines);
     let dict = PyDict::new(py);
     dict.set_item("valid", valid)?;
     dict.set_item("message", msg.unwrap_or_default())?;
@@ -665,7 +667,6 @@ fn validate_indentation_py(
 /// Args:
 ///     filepath (str): Path to the target file.
 ///     start (int): Start line of the edit range (1-based).
-///     end (int): End line of the edit range (1-based).
 ///     content (str): The content to indent.
 ///
 /// Returns:
@@ -674,18 +675,13 @@ fn validate_indentation_py(
 /// Raises:
 ///     IOError: File not found or read error.
 #[pyfunction]
-fn auto_indent_content_py(
-    filepath: &str,
-    start: usize,
-    end: usize,
-    content: &str,
-) -> PyResult<String> {
+fn auto_indent_content_py(filepath: &str, start: usize, content: &str) -> PyResult<String> {
     let lines: Vec<String> = split_file_lines(
         &fs::read_to_string(filepath)
             .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?,
     );
 
-    Ok(auto_indent_content(&lines, start, end, content))
+    Ok(auto_indent_content(&lines, start, content))
 }
 
 /// Check if content needs indentation fix.
@@ -693,7 +689,6 @@ fn auto_indent_content_py(
 /// Args:
 ///     filepath (str): Path to the target file.
 ///     start (int): Start line of the edit range (1-based).
-///     end (int): End line of the edit range (1-based).
 ///     content (str): The content to check.
 ///
 /// Returns:
@@ -702,13 +697,13 @@ fn auto_indent_content_py(
 /// Raises:
 ///     IOError: File not found or read error.
 #[pyfunction]
-fn needs_indent_fix_py(filepath: &str, start: usize, end: usize, content: &str) -> PyResult<bool> {
+fn needs_indent_fix_py(filepath: &str, start: usize, content: &str) -> PyResult<bool> {
     let lines: Vec<String> = split_file_lines(
         &fs::read_to_string(filepath)
             .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?,
     );
 
-    Ok(needs_indent_fix(&lines, start, end, content))
+    Ok(needs_indent_fix(&lines, start, content))
 }
 
 /// Verify context hash before applying an edit.

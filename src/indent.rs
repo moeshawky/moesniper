@@ -373,7 +373,6 @@ fn strip_trailing_comment(s: &str) -> &str {
 pub fn validate_indentation(
     all_lines: &[String],
     start_line: usize,
-    _end_line: usize,
     replacement_lines: &[String],
 ) -> (bool, Option<String>, Option<String>) {
     let (style, expected_level) = detect_expected_indent(all_lines, start_line);
@@ -449,12 +448,7 @@ pub fn validate_indentation(
 ///
 /// If the content is already at or above the expected indent level (i.e. the
 /// LLM sent correctly indented content), the content is returned unchanged.
-pub fn auto_indent_content(
-    all_lines: &[String],
-    start_line: usize,
-    _end_line: usize,
-    content: &str,
-) -> String {
+pub fn auto_indent_content(all_lines: &[String], start_line: usize, content: &str) -> String {
     let (style, expected_level) = detect_expected_indent(all_lines, start_line);
     let expected_indent = style.indent_string(expected_level);
 
@@ -523,12 +517,7 @@ pub fn auto_indent_content(
 // ————————————————————————————————————————————————————————————————————————————————
 
 /// Returns true if the content's minimum indentation is less than expected.
-pub fn needs_indent_fix(
-    all_lines: &[String],
-    start_line: usize,
-    _end_line: usize,
-    content: &str,
-) -> bool {
+pub fn needs_indent_fix(all_lines: &[String], start_line: usize, content: &str) -> bool {
     let (style, expected_level) = detect_expected_indent(all_lines, start_line);
     let expected_indent = style.indent_string(expected_level);
 
@@ -859,7 +848,7 @@ mod tests {
     fn test_auto_indent_unindented_content() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "print('hello')";
-        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        let fixed = auto_indent_content(&all_lines, 2, content);
         assert_eq!(fixed, "    print('hello')");
     }
 
@@ -867,7 +856,7 @@ mod tests {
     fn test_auto_indent_strips_existing_whitespace() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "  print('hello')";
-        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        let fixed = auto_indent_content(&all_lines, 2, content);
         assert_eq!(fixed, "    print('hello')");
     }
 
@@ -875,7 +864,7 @@ mod tests {
     fn test_auto_indent_multiline_content() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "print('hello')\nprint('world')";
-        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        let fixed = auto_indent_content(&all_lines, 2, content);
         assert_eq!(fixed, "    print('hello')\n    print('world')");
     }
 
@@ -883,7 +872,7 @@ mod tests {
     fn test_auto_indent_preserves_blank_lines() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "print('a')\n\nprint('b')";
-        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        let fixed = auto_indent_content(&all_lines, 2, content);
         assert_eq!(fixed, "    print('a')\n\n    print('b')");
     }
 
@@ -891,7 +880,7 @@ mod tests {
     fn test_auto_indent_mixed_existing_indent() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "  line1\n    line2\nline3";
-        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        let fixed = auto_indent_content(&all_lines, 2, content);
         // min_leading=0, delta=4. Overhangs preserved: (2-0=2→6), (4-0=4→8), (0-0=0→4)
         assert_eq!(fixed, "      line1\n        line2\n    line3");
     }
@@ -901,7 +890,7 @@ mod tests {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         // Content already has correct base indent with internal nesting — leave it alone
         let content = "    let x = 1;\n        if true {\n            run();\n        }\n    }";
-        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        let fixed = auto_indent_content(&all_lines, 2, content);
         assert_eq!(fixed, content);
     }
 
@@ -910,7 +899,7 @@ mod tests {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         // Content has internal structure but base indent is too shallow (2 spaces vs 4)
         let content = "  let x = 1;\n      if true {\n          run();\n      }\n  }";
-        let fixed = auto_indent_content(&all_lines, 2, 2, content);
+        let fixed = auto_indent_content(&all_lines, 2, content);
         // Min leading = 2, delta = 2. Every line gets 2 extra spaces.
         assert_eq!(
             fixed,
@@ -922,7 +911,7 @@ mod tests {
     fn test_auto_indent_no_indent_needed() {
         let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
         let content = "println!(\"hello\");";
-        let fixed = auto_indent_content(&all_lines, 1, 1, content);
+        let fixed = auto_indent_content(&all_lines, 1, content);
         assert_eq!(fixed, "println!(\"hello\");");
     }
 
@@ -935,7 +924,7 @@ mod tests {
             .chain(std::iter::once("\t\tpass".to_string()))
             .collect();
         let content = "print('hello')";
-        let fixed = auto_indent_content(&lines, 31, 31, content);
+        let fixed = auto_indent_content(&lines, 31, content);
         // Content replaces line 31, inside the `{` block → level 2
         assert_eq!(fixed, "\t\tprint('hello')");
     }
@@ -950,26 +939,26 @@ mod tests {
         // Guard: min_leading(4) >= expected_indent.len()(2) → content left unchanged.
         // Style mismatch is handled by validate_indentation, not auto_indent.
         let content = "    print('hello')";
-        let fixed = auto_indent_content(&lines, 31, 31, content);
+        let fixed = auto_indent_content(&lines, 31, content);
         assert_eq!(fixed, "    print('hello')");
     }
 
     #[test]
     fn test_needs_indent_fix_unindented_content() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
-        assert!(needs_indent_fix(&all_lines, 2, 2, "print('hello')"));
+        assert!(needs_indent_fix(&all_lines, 2, "print('hello')"));
     }
 
     #[test]
     fn test_needs_indent_fix_already_indented() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
-        assert!(!needs_indent_fix(&all_lines, 2, 2, "    print('hello')"));
+        assert!(!needs_indent_fix(&all_lines, 2, "    print('hello')"));
     }
 
     #[test]
     fn test_needs_indent_fix_partial_indent() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
-        assert!(needs_indent_fix(&all_lines, 2, 2, "  print('hello')"));
+        assert!(needs_indent_fix(&all_lines, 2, "  print('hello')"));
     }
 
     #[test]
@@ -979,15 +968,15 @@ mod tests {
             .chain(std::iter::once("\t\tpass".to_string()))
             .collect();
         // Unindented content needs fix (expected level 2)
-        assert!(needs_indent_fix(&lines, 31, 31, "print('hello')"));
+        assert!(needs_indent_fix(&lines, 31, "print('hello')"));
         // Content at level 2 (two tabs) is correct
-        assert!(!needs_indent_fix(&lines, 31, 31, "\t\tprint('hello')"));
+        assert!(!needs_indent_fix(&lines, 31, "\t\tprint('hello')"));
     }
 
     #[test]
     fn test_needs_indent_fix_top_level() {
         let all_lines = vec!["fn main() {\n".to_string(), "    let x = 1;\n".to_string()];
-        assert!(!needs_indent_fix(&all_lines, 1, 1, "println!(\"hello\");"));
+        assert!(!needs_indent_fix(&all_lines, 1, "println!(\"hello\");"));
     }
 
     // ============================================================
@@ -998,7 +987,7 @@ mod tests {
     fn test_validate_indentation_missing() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let replacement = vec!["print('hello')".to_string()];
-        let (valid, warning, fix) = validate_indentation(&all_lines, 2, 2, &replacement);
+        let (valid, warning, fix) = validate_indentation(&all_lines, 2, &replacement);
         assert!(!valid);
         assert!(warning.is_some());
         assert!(warning.unwrap().contains("4 space"));
@@ -1009,7 +998,7 @@ mod tests {
     fn test_validate_indentation_correct() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let replacement = vec!["    print('hello')".to_string()];
-        let (valid, warning, _fix) = validate_indentation(&all_lines, 2, 2, &replacement);
+        let (valid, warning, _fix) = validate_indentation(&all_lines, 2, &replacement);
         assert!(valid);
         assert!(warning.is_none());
     }
@@ -1018,7 +1007,7 @@ mod tests {
     fn test_validate_indentation_partial_fix_strips_existing() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let replacement = vec!["  print('hello')".to_string()];
-        let (valid, _warning, fix) = validate_indentation(&all_lines, 2, 2, &replacement);
+        let (valid, _warning, fix) = validate_indentation(&all_lines, 2, &replacement);
         assert!(!valid);
         assert_eq!(fix.unwrap(), "    print('hello')");
     }
@@ -1027,7 +1016,7 @@ mod tests {
     fn test_validate_indentation_empty_replacement() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let replacement: Vec<String> = vec!["".to_string()];
-        let (valid, warning, _fix) = validate_indentation(&all_lines, 2, 2, &replacement);
+        let (valid, warning, _fix) = validate_indentation(&all_lines, 2, &replacement);
         assert!(valid);
         assert!(warning.is_none());
     }
@@ -1036,7 +1025,7 @@ mod tests {
     fn test_validate_indentation_whitespace_only_line() {
         let all_lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let replacement = vec!["    ".to_string(), "print('x')".to_string()];
-        let (valid, _warning, _fix) = validate_indentation(&all_lines, 2, 2, &replacement);
+        let (valid, _warning, _fix) = validate_indentation(&all_lines, 2, &replacement);
         assert!(!valid);
     }
 
@@ -1054,7 +1043,7 @@ mod tests {
             "    }\n".to_string(),
             "}\n".to_string(),
         ];
-        let (valid, warning, _fix) = validate_indentation(&all_lines, 3, 5, &replacement);
+        let (valid, warning, _fix) = validate_indentation(&all_lines, 3, &replacement);
         assert!(
             valid,
             "Closer tokens at lower indent are correct, got warning: {:?}",
@@ -1070,7 +1059,7 @@ mod tests {
             "}\n".to_string(),
         ];
         let replacement = vec!["}".to_string()];
-        let (valid, _warning, _fix) = validate_indentation(&all_lines, 2, 2, &replacement);
+        let (valid, _warning, _fix) = validate_indentation(&all_lines, 2, &replacement);
         assert!(valid, "Single closing brace at lower indent is correct");
     }
 
@@ -1144,7 +1133,7 @@ mod tests {
         // Context: editing at line 3, inside the block (indent level 1).
         // The `}` to close fn outer should be at level 0.
         let content = "}";
-        let fixed = auto_indent_content(&lines, 3, 3, content);
+        let fixed = auto_indent_content(&lines, 3, content);
         // EXPECTED: closing brace should be at block level 0
         assert_eq!(
             fixed, "}",
@@ -1164,7 +1153,7 @@ mod tests {
         ];
         // Content: `}` (close outer) then `fn next() {` (new function at level 0)
         let content = "}\nfn next() {";
-        let fixed = auto_indent_content(&lines, 5, 5, content);
+        let fixed = auto_indent_content(&lines, 5, content);
         // EXPECTED: `}` at level 0, `fn next()` at level 0
         assert_eq!(
             fixed, "}\nfn next() {",
@@ -1189,7 +1178,7 @@ mod tests {
         // indent_char = '\t', repeat for expected_indent.len() + overhang = 2+4 = 6
         // Bug: all 6 chars become tabs, but overhang should remain spaces.
         let content = "outer\n    inner";
-        let fixed = auto_indent_content(&lines, 31, 31, content);
+        let fixed = auto_indent_content(&lines, 31, content);
         // EXPECTED: 2 tabs for base + 4 spaces for overhang
         assert_eq!(
             fixed, "\t\touter\n\t\t    inner",
@@ -1206,7 +1195,7 @@ mod tests {
         let lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         // Content has a whitespace-only line between two code lines
         let content = "x = 1\n    \ny = 2";
-        let fixed = auto_indent_content(&lines, 2, 2, content);
+        let fixed = auto_indent_content(&lines, 2, content);
         // Whitespace-only lines: trim() produces empty, so they're skipped
         // for min_leading computation but should be preserved as-is in output.
         // Actually the current code: if line.trim().is_empty() → returns line unchanged
@@ -1272,7 +1261,7 @@ mod tests {
         // This test verifies that needs_indent_fix only checks width, not style.
         // Current behavior: it returns false (4 >= 2), which means the content
         // "appears" correct but actually uses wrong whitespace character.
-        assert!(!needs_indent_fix(&lines, 31, 31, "    print('hello')"));
+        assert!(!needs_indent_fix(&lines, 31, "    print('hello')"));
     }
 
     // --- BUG 7: auto_indent_content with empty file ---
@@ -1282,7 +1271,7 @@ mod tests {
         // Inserting content into an empty file at line 1.
         let lines: Vec<String> = vec![];
         let content = "fn main() {\n    println!(\"hello\");\n}";
-        let fixed = auto_indent_content(&lines, 1, 1, content);
+        let fixed = auto_indent_content(&lines, 1, content);
         // Empty file → default indent style (4 spaces), level 0.
         // expected_indent = "" (level 0) → content returned unchanged.
         assert_eq!(fixed, content);
@@ -1339,7 +1328,7 @@ mod tests {
             "}\n".to_string(),
         ];
         let replacement = vec!["    }\n".to_string(), "}\n".to_string()];
-        let (valid, warning, _fix) = validate_indentation(&lines, 4, 5, &replacement);
+        let (valid, warning, _fix) = validate_indentation(&lines, 4, &replacement);
         // `}` at level 1 closes `if`, `}` at level 0 closes `outer`.
         // Closer tokens should be skipped for min_leading computation.
         assert!(
@@ -1380,7 +1369,7 @@ mod tests {
         // Should be returned unchanged.
         let lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "    x = 1\n        if y:\n            z()\n    w = 2";
-        let fixed = auto_indent_content(&lines, 2, 2, content);
+        let fixed = auto_indent_content(&lines, 2, content);
         // min_leading = 4 (from "    x = 1"), expected_indent.len() = 4
         // 4 >= 4 → content returned unchanged
         assert_eq!(fixed, content);
@@ -1394,7 +1383,7 @@ mod tests {
         // Should be returned unchanged because min_leading >= expected.
         let lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = "        overindented"; // 8 spaces, expected 4
-        let fixed = auto_indent_content(&lines, 2, 2, content);
+        let fixed = auto_indent_content(&lines, 2, content);
         // min_leading(8) >= expected_indent.len()(4) → unchanged
         assert_eq!(fixed, content);
     }
@@ -1405,7 +1394,7 @@ mod tests {
     fn bug_auto_indent_single_empty_line() {
         let lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let content = ""; // empty content
-        let fixed = auto_indent_content(&lines, 2, 2, content);
+        let fixed = auto_indent_content(&lines, 2, content);
         assert_eq!(fixed, "");
     }
 
@@ -1416,7 +1405,7 @@ mod tests {
         // Replacement has MORE indentation than expected — passes validation.
         let lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
         let replacement = vec!["        print('over')".to_string()]; // 8 spaces vs expected 4
-        let (valid, _warning, _fix) = validate_indentation(&lines, 2, 2, &replacement);
+        let (valid, _warning, _fix) = validate_indentation(&lines, 2, &replacement);
         // Only checks min_leading < expected_spaces. 8 >= 4 → valid.
         assert!(valid, "Over-indented content should pass validation");
     }
@@ -1446,7 +1435,7 @@ mod tests {
             "    // insert here\n".to_string(),
         ];
         let content = "    do_thing()\n}";
-        let fixed = auto_indent_content(&lines, 2, 2, content);
+        let fixed = auto_indent_content(&lines, 2, content);
         // `do_thing()` at level 1 (4 spaces), `}` at level 0 (closes outer).
         assert_eq!(
             fixed, "    do_thing()\n}",

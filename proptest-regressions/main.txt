@@ -9,3 +9,4 @@ cc 3022d415c20fd2106795e1fc5c3dd488663026c266427d940d390414a3228e30 # shrinks to
 cc 10c4fee9d54d608fa687b748ae9d54a851b374da15effe35fa3579dd2643f83a # shrinks to content = "\n\nacf\nsv\nmo\n\nsj\n\na\nf\n\nuct\n", replacement = "\n\n\nsjfy\n\n\nmkfcvz\n", line_num = 2
 cc e605b9643bd5ef8e89a4e3258bdd3f36b7f123fc0554d52f1a2ed99b8fba932a # shrinks to content = "\nit\nrch\n\n\n\nblpc\ngq\nfqjns\nogp\n\n\n\n\nce\n", replacement = "z\nkv\ne\n\nm\nj\ngc\n", line_num = 2
 cc 030075513799964052c32463c6df9fce7bd3b61257ffac9c830856844954b480 # shrinks to content = "fr\n\nc\nw\nemv", replacement = "mx\n\n\nl\nla\noyngo\n\n\nc\nf\ncp\n\n\n", line_num = 1
+cc ece15b9324648d30ae38d5ce3b9802536c48a846306ef66e541f182db96c9a58 # shrinks to content = "\niu\n\na\n\nfi\nay\nlsj\nsxh\nqg\nhvjj\nyxfxw\nqi\nve\n\nqp\n\na", replacement = "k\nan\n\n\nz\nhic\n", line_num = 1

@@ -260,13 +260,13 @@ class TestValidateIndentation:
 
     def test_missing_indent_reported(self, sniper, indented_file):
         """Unindented replacement at expected-indent site fails validation."""
-        result = sniper.validate_indentation(str(indented_file), 2, 2, "print('hello')")
+        result = sniper.validate_indentation(str(indented_file), 2, "print('hello')")
         assert result["valid"] is False
         assert "4 space" in result["message"]
 
     def test_correct_indent_passes(self, sniper, indented_file):
         """Correctly indented replacement passes validation."""
-        result = sniper.validate_indentation(str(indented_file), 2, 2, "    print('hello')")
+        result = sniper.validate_indentation(str(indented_file), 2, "    print('hello')")
         assert result["valid"] is True
 
 
@@ -276,7 +276,7 @@ class TestAutoIndentContent:
     def test_adds_expected_indent(self, sniper, test_file):
         """Auto-indent prepends the detected indent level."""
         test_file.write_text("def foo():\n    pass\n")
-        result = sniper.auto_indent_content(str(test_file), 2, 2, "print('hello')")
+        result = sniper.auto_indent_content(str(test_file), 2, "print('hello')")
         assert result == "    print('hello')"
 
 
@@ -286,12 +286,12 @@ class TestNeedsIndentFix:
     def test_detects_unindented(self, sniper, test_file):
         """Unindented content triggers needs_indent_fix."""
         test_file.write_text("def foo():\n    pass\n")
-        assert sniper.needs_indent_fix(str(test_file), 2, 2, "print('x')") is True
+        assert sniper.needs_indent_fix(str(test_file), 2, "print('x')") is True
 
     def test_correct_indent_passes(self, sniper, test_file):
         """Already-correct indent returns False."""
         test_file.write_text("def foo():\n    pass\n")
-        assert sniper.needs_indent_fix(str(test_file), 2, 2, "    print('x')") is False
+        assert sniper.needs_indent_fix(str(test_file), 2, "    print('x')") is False
 
 
 # ── Context Verification ─────────────────────────────────────────────────
