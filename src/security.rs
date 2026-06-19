@@ -80,6 +80,13 @@ pub fn validate_path<P: AsRef<Path>>(
 ) -> Result<PathBuf, PathSecurityError> {
     let path = path.as_ref();
 
+    // Explicit null-byte guard: C truncation can hide embedded NULs.
+    if path.as_os_str().as_encoded_bytes().contains(&0) {
+        return Err(PathSecurityError::IoError(
+            "path contains a null byte".to_string(),
+        ));
+    }
+
     // Layer 1: Check for parent references
     for component in path.components() {
         if component == Component::ParentDir && policy.reject_parent_refs {
@@ -117,6 +124,16 @@ pub fn validate_path<P: AsRef<Path>>(
     }
 
     Ok(canonical)
+}
+
+/// Returns true when `path` is an existing regular file.
+///
+/// Useful as a quick pre-read guard to reject FIFOs, pipes, and other
+/// special files that would otherwise block or behave unexpectedly.
+pub fn is_regular_file<P: AsRef<Path>>(path: P) -> bool {
+    fs::metadata(path.as_ref())
+        .map(|m| m.is_file())
+        .unwrap_or(false)
 }
 
 /// Clean a path by removing redundant components (. and ..).
@@ -315,5 +332,32 @@ mod tests {
                 case
             );
         }
+    }
+
+    #[test]
+    fn test_null_byte_rejected() {
+        let policy = SecurityPolicy::default();
+        // Use OsStr to embed an actual null byte that Rust's C layer would truncate.
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let with_nul = OsStr::from_bytes(b"file.txt\x00.txt");
+        let result = validate_path(with_nul, &policy);
+        assert!(result.is_err(), "Path with null byte must be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("null byte"),
+            "Error should mention null byte: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_is_regular_file() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("regular.txt");
+        fs::write(&file, "content").unwrap();
+        assert!(is_regular_file(&file));
+        assert!(!is_regular_file(dir.path().join("nonexistent.txt")));
+        assert!(!is_regular_file(dir.path()));
     }
 }

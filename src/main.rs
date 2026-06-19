@@ -33,6 +33,7 @@ mod help_text;
 use std::fs;
 use std::io::Read;
 
+use moesniper::security::is_regular_file;
 use moesniper::{
     auto_indent_content, check_file_size, compute_context_hash, count_recent_backups,
     create_backup, find_latest_backup, generate_preview, handle_backtrack_error, hex_decode,
@@ -89,6 +90,18 @@ fn run(args: Vec<String>) -> std::process::ExitCode {
         .collect();
 
     let result = match args.as_slice() {
+        ["decode"] if use_stdin => {
+            let mut buffer = String::new();
+            match std::io::stdin().read_to_string(&mut buffer) {
+                Ok(_) => cmd_decode(&buffer),
+                Err(e) => err(format!("read stdin: {e}")),
+            }
+        }
+        ["decode", "--file", path] => match fs::read_to_string(path) {
+            Ok(content) => cmd_decode(&content),
+            Err(e) => err(format!("read {path}: {e}")),
+        },
+        ["decode", hex] => cmd_decode(hex),
         ["encode"] if use_stdin => {
             let mut buffer = String::new();
             match std::io::stdin().read_to_string(&mut buffer) {
@@ -310,6 +323,21 @@ fn cmd_encode(text: &str) -> CliResult {
     }
 }
 
+fn cmd_decode(hex_or_text: &str) -> CliResult {
+    let input = hex_or_text.trim();
+    if input.is_empty() {
+        return err("decode requires a hex string".into());
+    }
+    match hex_decode(input) {
+        Ok(text) => CliResult {
+            status: "ok".into(),
+            message: Some(text),
+            ..Default::default()
+        },
+        Err(msg) => err(format!("hex decode: {msg}")),
+    }
+}
+
 fn cmd_context(filepath: &str, start: usize, end: usize) -> CliResult {
     let config = SniperConfig::from_env();
 
@@ -330,6 +358,10 @@ fn cmd_context(filepath: &str, start: usize, end: usize) -> CliResult {
     if start < 1 || end > lines.len() || start > end + 1 {
         if start == lines.len() + 1 && (start == end + 1 || start == end) {
             // Allow computing context at end of file
+        } else if start > end + 1 {
+            return err(format!(
+                "inverted range {start}-{end} is invalid (must satisfy start <= end + 1 to allow insertions at EOF)"
+            ));
         } else {
             return err(format!(
                 "line range {start}-{end} out of bounds (file has {} lines)",
@@ -383,6 +415,24 @@ fn cmd_splice(
         None
     };
 
+    // Guard: block writes into special files (FIFOs, devices, etc.).
+    if !dry_run && !is_regular_file(filepath) {
+        return err(
+            "target path is not a regular file (FIFOs, pipes, and devices are not supported)"
+                .into(),
+        );
+    }
+    // Guard: refuse to overwrite read-only files via atomic rename
+    if !dry_run {
+        if let Ok(meta) = fs::metadata(filepath) {
+            if meta.permissions().readonly() && meta.len() > 0 {
+                return err(format!(
+                    "file is read-only: {filepath}. Refusing to overwrite via atomic rename"
+                ));
+            }
+        }
+    }
+
     let text = match fs::read_to_string(filepath) {
         Ok(t) => t,
         Err(e) => return err(handle_backtrack_error(e, "Read")),
@@ -390,6 +440,12 @@ fn cmd_splice(
     let lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
     if let Some(expected) = context_hash {
+        if expected.len() != 16 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+            return err(format!(
+                "invalid --context length {:?}; expected 16 hex chars (e.g. a 16-char prefix from the context command)",
+                expected.len()
+            ));
+        }
         if let Err(e) = verify_context(&lines, start, end, expected) {
             return err(e);
         }
@@ -398,6 +454,10 @@ fn cmd_splice(
     if start < 1 || end > lines.len() || start > end + 1 {
         if start == lines.len() + 1 && (start == end + 1 || start == end) {
             // Allow inserting at end
+        } else if start > end + 1 {
+            return err(format!(
+                "inverted range {start}-{end} is invalid (must satisfy start <= end + 1 to allow insertions at EOF)"
+            ));
         } else {
             return err(format!(
                 "line range {start}-{end} out of bounds (file has {} lines)",
@@ -603,6 +663,24 @@ fn cmd_manifest_impl(
         None
     };
 
+    // Guard: block writes into special files (FIFOs, devices, etc.)
+    if !dry_run && !is_regular_file(filepath) {
+        return err(
+            "target path is not a regular file (FIFOs, pipes, and devices are not supported)"
+                .into(),
+        );
+    }
+    // Guard: refuse to overwrite read-only files via atomic rename
+    if !dry_run {
+        if let Ok(meta) = fs::metadata(filepath) {
+            if meta.permissions().readonly() && meta.len() > 0 {
+                return err(format!(
+                    "file is read-only: {filepath}. Refusing to overwrite via atomic rename"
+                ));
+            }
+        }
+    }
+
     let mut ops: Vec<ManifestOp> = match serde_json::from_str(manifest) {
         Ok(o) => o,
         Err(e) => return err(format!("parse manifest: {e}")),
@@ -645,6 +723,12 @@ fn cmd_manifest_impl(
     // against the pre-manifest file state (before any operation mutates lines).
     // This is a pre-manifest entry gate, not per-operation verification.
     if let Some(expected) = context_hash {
+        if expected.len() != 16 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+            return err(format!(
+                "invalid --context length {:?}; expected 16 hex chars (e.g. a 16-char prefix from the context command)",
+                expected.len()
+            ));
+        }
         if let Some(first_op) = ops.first() {
             let first_end = first_op.end.unwrap_or(first_op.start);
             if let Err(e) = verify_context(&lines, first_op.start, first_end, expected) {
@@ -665,6 +749,10 @@ fn cmd_manifest_impl(
         if start < 1 || end > lines.len() || start > end + 1 {
             if start == lines.len() + 1 && (start == end + 1 || start == end) {
                 // Allow inserting at end
+            } else if start > end + 1 {
+                return err(format!(
+                    "inverted range {start}-{end} is invalid (must satisfy start <= end + 1 to allow insertions at EOF)"
+                ));
             } else {
                 return err(format!(
                     "line range {start}-{end} out of bounds (file has {} lines)",
@@ -2560,5 +2648,129 @@ mod tests {
             r.status, "error",
             "Rust rejects end=lines.len()+1 when start < lines.len()+1 (Python allows this)"
         );
+    }
+
+    // =========================================================================
+    // F-010: INVERTED RANGE ERROR MESSAGE
+    // =========================================================================
+
+    #[test]
+    fn test_inverted_range_error_message() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "inv_range.txt", "a\nb\nc\n");
+        let r = cmd_splice(&path, 5, 2, "x", false, false, false, None);
+        assert_eq!(r.status, "error");
+        assert!(
+            r.message.as_deref().unwrap().contains("inverted range"),
+            "Expected 'inverted range' in error, got: {:?}",
+            r.message
+        );
+    }
+
+    // =========================================================================
+    // F-009: CONTEXT HASH LENGTH VALIDATION
+    // =========================================================================
+
+    #[test]
+    fn test_context_hash_too_short_rejected() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "ctx_short.txt", "a\nb\n");
+        let r = cmd_splice(&path, 1, 1, "x", false, false, false, Some("abc"));
+        assert_eq!(r.status, "error");
+        assert!(
+            r.message
+                .as_deref()
+                .unwrap()
+                .contains("invalid --context length"),
+            "Expected context length error, got: {:?}",
+            r.message
+        );
+    }
+
+    #[test]
+    fn test_context_hash_non_hex_rejected() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "ctx_nonhex.txt", "a\nb\n");
+        let r = cmd_splice(
+            &path,
+            1,
+            1,
+            "x",
+            false,
+            false,
+            false,
+            Some("zzzzzzzzzzzzzzzz"),
+        );
+        assert_eq!(r.status, "error");
+        assert!(
+            r.message
+                .as_deref()
+                .unwrap()
+                .contains("invalid --context length"),
+            "Expected context length error, got: {:?}",
+            r.message
+        );
+    }
+
+    // =========================================================================
+    // F-015: DECODE SUBCOMMAND
+    // =========================================================================
+
+    #[test]
+    fn test_decode_hex_string() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "decode_hex.txt", "a\nb\n");
+        let r = cmd_splice(&path, 1, 1, "48656c6c6f", false, false, false, None);
+        assert_eq!(r.status, "ok");
+        let content = read_file(&path);
+        assert_eq!(content, "Hello\n");
+    }
+
+    #[test]
+    fn test_decode_invalid_hex() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "decode_bad.txt", "a\nb\n");
+        let r = cmd_splice(&path, 1, 1, "zzzz", false, false, false, None);
+        assert_eq!(r.status, "error");
+        assert!(
+            r.message.as_deref().unwrap().contains("hex decode"),
+            "Expected hex decode error, got: {:?}",
+            r.message
+        );
+    }
+
+    // =========================================================================
+    // F-002: READ-ONLY FILE GUARD
+    // =========================================================================
+
+    #[test]
+    fn test_readonly_file_rejected() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "readonly.txt", "original\n");
+        // Make read-only
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&path, perms).unwrap();
+
+        let r = cmd_splice(&path, 1, 1, "xx", false, false, false, None);
+        assert_eq!(r.status, "error");
+        assert!(
+            r.message.as_deref().unwrap().contains("read-only"),
+            "Expected read-only error, got: {:?}",
+            r.message
+        );
+
+        // Restore permissions for cleanup
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        #[cfg(not(unix))]
+        {
+            let mut perms = fs::metadata(&path).unwrap().permissions();
+            perms.set_readonly(false);
+            fs::set_permissions(&path, perms).unwrap();
+        }
     }
 }

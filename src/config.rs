@@ -86,9 +86,18 @@ impl SniperConfig {
         let mut config = Self::default();
 
         // Lock timeout: SNIPER_LOCK_TIMEOUT (in seconds)
+        // Hard clamp to prevent long hangs from huge or invalid values.
         if let Ok(val) = env::var("SNIPER_LOCK_TIMEOUT") {
-            if let Ok(secs) = val.parse::<u64>() {
-                config.lock_timeout = Duration::from_secs(secs.max(1)); // Minimum 1 second
+            match val.trim().parse::<u64>() {
+                Ok(secs) => {
+                    config.lock_timeout = Duration::from_secs(secs.clamp(1, 60));
+                }
+                Err(_) => {
+                    eprintln!(
+                        "[SNIPER] Warning: ignoring non-numeric SNIPER_LOCK_TIMEOUT={:?}; using default 30s",
+                        val
+                    );
+                }
             }
         }
 
@@ -120,9 +129,18 @@ impl SniperConfig {
         config.dal_level = DalLevel::from_env();
 
         // PID base ms: SNIPER_PID_BASE_MS
+        // Clamp to a sane upper bound to avoid runaway pacing.
         if let Ok(val) = env::var("SNIPER_PID_BASE_MS") {
-            if let Ok(ms) = val.parse::<u64>() {
-                config.pid_base_ms = ms;
+            match val.trim().parse::<u64>() {
+                Ok(ms) => {
+                    config.pid_base_ms = ms.min(5_000);
+                }
+                Err(_) => {
+                    eprintln!(
+                        "[SNIPER] Warning: ignoring non-numeric SNIPER_PID_BASE_MS={:?}; using default 0ms",
+                        val
+                    );
+                }
             }
         }
 
@@ -311,5 +329,36 @@ mod tests {
         assert_eq!(config.pid_pressure_scale, 3.0);
         std::env::remove_var("SNIPER_PID_ENTROPY_SCALE");
         std::env::remove_var("SNIPER_PID_PRESSURE_SCALE");
+    }
+
+    #[test]
+    fn test_config_pid_base_ms_clamped() {
+        let old = std::env::var("SNIPER_PID_BASE_MS").ok();
+        std::env::set_var("SNIPER_PID_BASE_MS", "999999");
+        let config = SniperConfig::from_env();
+        assert_eq!(
+            config.pid_base_ms, 5_000,
+            "pid_base_ms should be clamped to 5000"
+        );
+        match old {
+            Some(v) => std::env::set_var("SNIPER_PID_BASE_MS", v),
+            None => std::env::remove_var("SNIPER_PID_BASE_MS"),
+        }
+    }
+
+    #[test]
+    fn test_config_lock_timeout_clamped() {
+        let old = std::env::var("SNIPER_LOCK_TIMEOUT").ok();
+        std::env::set_var("SNIPER_LOCK_TIMEOUT", "9999");
+        let config = SniperConfig::from_env();
+        assert_eq!(
+            config.lock_timeout,
+            Duration::from_secs(60),
+            "lock_timeout should be clamped to 60s"
+        );
+        match old {
+            Some(v) => std::env::set_var("SNIPER_LOCK_TIMEOUT", v),
+            None => std::env::remove_var("SNIPER_LOCK_TIMEOUT"),
+        }
     }
 }
