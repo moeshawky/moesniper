@@ -33,7 +33,6 @@ mod help_text;
 use std::fs;
 use std::io::Read;
 
-use moesniper::security::is_regular_file;
 use moesniper::{
     auto_indent_content, check_file_size, compute_context_hash, count_recent_backups,
     create_backup, find_latest_backup, generate_preview, handle_backtrack_error, hex_decode,
@@ -341,14 +340,18 @@ fn cmd_decode(hex_or_text: &str) -> CliResult {
 fn cmd_context(filepath: &str, start: usize, end: usize) -> CliResult {
     let config = SniperConfig::from_env();
 
-    if let Err(e) = normalize_path(filepath) {
-        return err(e);
-    }
-    if let Err(e) = check_file_size(filepath, config.max_file_size) {
+    let resolved_path = match normalize_path(filepath) {
+        Ok(p) => p,
+        Err(e) => return err(e),
+    };
+    let resolved_str = resolved_path
+        .to_str()
+        .expect("resolved path must be valid UTF-8");
+    if let Err(e) = check_file_size(resolved_str, config.max_file_size) {
         return err(e);
     }
 
-    let text = match fs::read_to_string(filepath) {
+    let text = match fs::read_to_string(&resolved_path) {
         Ok(t) => t,
         Err(e) => return err(format!("read file: {e}")),
     };
@@ -395,19 +398,26 @@ fn cmd_splice(
     // Load configuration
     let config = SniperConfig::from_env();
 
-    // Validate path before any file operations
-    if let Err(e) = normalize_path(filepath) {
-        return err(e);
-    }
+    // Validate and resolve path before any file operations.
+    // canonicalize resolves symlinks and relative components so all
+    // downstream operations (lock, read, backup, atomic write) target
+    // the real file, not an intermediate symlink.
+    let resolved_path = match normalize_path(filepath) {
+        Ok(p) => p,
+        Err(e) => return err(e),
+    };
+    let resolved_str = resolved_path
+        .to_str()
+        .expect("resolved path must be valid UTF-8");
 
-    if let Err(e) = check_file_size(filepath, config.max_file_size) {
+    if let Err(e) = check_file_size(resolved_str, config.max_file_size) {
         return err(e);
     }
 
     // Only acquire lock for real writes; dry-run reads are lock-free
     // so .sniper/ directory is not created when no writes occur.
     let _lock: Option<SniperLock> = if !dry_run {
-        match SniperLock::acquire_with_config(filepath, &config) {
+        match SniperLock::acquire_with_config(resolved_str, &config) {
             Ok(l) => Some(l),
             Err(e) => return err(e),
         }
@@ -415,39 +425,7 @@ fn cmd_splice(
         None
     };
 
-    // Guard: block writes into special files (FIFOs, devices, etc.).
-    if !dry_run && !is_regular_file(filepath) {
-        return err(
-            "target path is not a regular file (FIFOs, pipes, and devices are not supported)"
-                .into(),
-        );
-    }
-    // Guard: refuse to overwrite read-only files via atomic rename
-    if !dry_run {
-        if let Ok(meta) = fs::metadata(filepath) {
-            if meta.permissions().readonly() && meta.len() > 0 {
-                return err(format!(
-                    "file is read-only: {filepath}. Refusing to overwrite via atomic rename"
-                ));
-            }
-        }
-    }
-
-    // F-013: Scan first 4KB for null bytes (binary file heuristic).
-    if let Ok(mut f) = fs::File::open(filepath) {
-        use std::io::Read;
-        let mut buf = [0u8; 4096];
-        if let Ok(n) = f.read(&mut buf) {
-            if buf[..n].contains(&0) {
-                eprintln!(
-                    "[SNIPER] Warning: {:?} contains null bytes — may be binary or corrupted",
-                    filepath
-                );
-            }
-        }
-    }
-
-    let text = match fs::read_to_string(filepath) {
+    let text = match fs::read_to_string(&resolved_path) {
         Ok(t) => t,
         Err(e) => return err(handle_backtrack_error(e, "Read")),
     };
@@ -571,7 +549,7 @@ fn cmd_splice(
     let guard = ResourceGuard::auto(0.5);
     let risk = RiskTelemetry::from_guard(&guard);
 
-    let bk = match create_backup(filepath) {
+    let bk = match create_backup(resolved_str) {
         Ok(b) => b,
         Err(e) => return err(e),
     };
@@ -589,16 +567,16 @@ fn cmd_splice(
     let lines_refs: Vec<&str> = modified_lines.iter().map(|s| s.as_str()).collect();
 
     // Use pre-computed guard, risk, and dal_level from config above
-    if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, &config) {
+    if let Err(e) = write_atomic_with_dal(resolved_str, &lines_refs, &guard, &config) {
         return err(e);
     }
 
     // Purge old backups according to retention policy
-    if let Err(e) = purge_old_backups(filepath, &config) {
+    if let Err(e) = purge_old_backups(resolved_str, &config) {
         eprintln!("[SNIPER] Backup purge warning: {e}");
     }
 
-    let manifest_promotion = count_recent_backups(filepath, config.lock_timeout.as_secs())
+    let manifest_promotion = count_recent_backups(resolved_str, config.lock_timeout.as_secs())
         .map(|count| count >= 3)
         .unwrap_or(false);
 
@@ -671,17 +649,23 @@ fn cmd_manifest_impl(
 ) -> CliResult {
     let config = SniperConfig::from_env();
 
-    // Validate path before any file operations
-    if let Err(e) = normalize_path(filepath) {
-        return err(e);
-    }
+    // Validate and resolve path before any file operations.
+    // canonicalize resolves symlinks and relative components so all
+    // downstream operations target the real file.
+    let resolved_path = match normalize_path(filepath) {
+        Ok(p) => p,
+        Err(e) => return err(e),
+    };
+    let resolved_str = resolved_path
+        .to_str()
+        .expect("resolved path must be valid UTF-8");
 
-    if let Err(e) = check_file_size(filepath, config.max_file_size) {
+    if let Err(e) = check_file_size(resolved_str, config.max_file_size) {
         return err(e);
     }
 
     let _lock: Option<SniperLock> = if !dry_run {
-        match SniperLock::acquire_with_config(filepath, &config) {
+        match SniperLock::acquire_with_config(resolved_str, &config) {
             Ok(l) => Some(l),
             Err(e) => return err(e),
         }
@@ -689,48 +673,16 @@ fn cmd_manifest_impl(
         None
     };
 
-    // Guard: block writes into special files (FIFOs, devices, etc.)
-    if !dry_run && !is_regular_file(filepath) {
-        return err(
-            "target path is not a regular file (FIFOs, pipes, and devices are not supported)"
-                .into(),
-        );
-    }
-    // Guard: refuse to overwrite read-only files via atomic rename
-    if !dry_run {
-        if let Ok(meta) = fs::metadata(filepath) {
-            if meta.permissions().readonly() && meta.len() > 0 {
-                return err(format!(
-                    "file is read-only: {filepath}. Refusing to overwrite via atomic rename"
-                ));
-            }
-        }
-    }
-
     let mut ops: Vec<ManifestOp> = match serde_json::from_str(manifest) {
         Ok(o) => o,
         Err(e) => return err(format!("parse manifest: {e}")),
     };
 
-    // Note: hex validation occurs at decode time in the operation loop below (line ~629).
+    // Note: hex validation occurs at decode time in the operation loop below.
     // Pre-validating here would decode twice — the operation loop catches decode errors
     // at the point of use.
 
-    // F-013: Scan first 4KB for null bytes (binary file heuristic).
-    if let Ok(mut f) = fs::File::open(filepath) {
-        use std::io::Read;
-        let mut buf = [0u8; 4096];
-        if let Ok(n) = f.read(&mut buf) {
-            if buf[..n].contains(&0) {
-                eprintln!(
-                    "[SNIPER] Warning: {:?} contains null bytes — may be binary or corrupted",
-                    filepath
-                );
-            }
-        }
-    }
-
-    let text = match fs::read_to_string(filepath) {
+    let text = match fs::read_to_string(&resolved_path) {
         Ok(t) => t,
         Err(e) => return err(handle_backtrack_error(e, "Read")),
     };
@@ -741,7 +693,7 @@ fn cmd_manifest_impl(
     if lines.is_empty()
         && !ops
             .iter()
-            .any(|op| op.hex.as_deref().map_or(false, |h| !h.is_empty()))
+            .any(|op| op.hex.as_deref().is_some_and(|h| !h.is_empty()))
     {
         return err("file is empty, nothing to edit via manifest".into());
     }
@@ -762,7 +714,7 @@ fn cmd_manifest_impl(
     }
 
     let bk = if !dry_run {
-        match create_backup(filepath) {
+        match create_backup(resolved_str) {
             Ok(b) => Some(b),
             Err(e) => return err(e),
         }
@@ -903,10 +855,10 @@ fn cmd_manifest_impl(
         // Reuse config from function scope instead of re-reading env (F7)
 
         // T6: Use write_atomic_with_dal with guard
-        if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, &config) {
+        if let Err(e) = write_atomic_with_dal(resolved_str, &lines_refs, &guard, &config) {
             return err(e);
         }
-        if let Err(e) = purge_old_backups(filepath, &config) {
+        if let Err(e) = purge_old_backups(resolved_str, &config) {
             eprintln!("[SNIPER] Backup purge warning: {e}");
         }
 

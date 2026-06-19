@@ -26,7 +26,10 @@ pub use config::DalLevel;
 /// Main configuration struct for sniper behavior.
 pub use config::SniperConfig;
 /// Re-exports for path security validation.
-pub use security::{normalize_path_secure, validate_path, PathSecurityError, SecurityPolicy};
+pub use security::{
+    is_regular_file, normalize_path_secure, validate_edit_target, validate_path, PathSecurityError,
+    SecurityPolicy,
+};
 
 use std::collections::HashSet;
 use std::fs;
@@ -157,10 +160,11 @@ fn sigmoid_f64(x: f64) -> f64 {
 /// Controls how long the process sleeps between resource check and file rename.
 /// The formula is: `base_ms + (entropy * entropy_scale) + (pressure * pressure_scale)`.
 ///
-/// Defaults produce zero sleep when entropy is low, scaling up with system load.
+/// **Internal use only** — constructed by [`write_atomic_impl`] from [`SniperConfig`] fields
+/// (`pid_base_ms`, `pid_entropy_scale`, `pid_pressure_scale`). No `Default` impl is provided
+/// because the single source of truth for PID parameters is [`SniperConfig`].
 ///
-/// **Internal use only** — constructed by [`write_atomic_impl`] from [`SniperConfig`].
-/// Not part of the public API surface; exposed as `pub(crate)` for test access.
+/// Exposed as `pub(crate)` for test access.
 #[derive(Debug, Clone)]
 pub(crate) struct PidConfig {
     /// Base sleep duration in milliseconds (always applied).
@@ -169,16 +173,6 @@ pub(crate) struct PidConfig {
     pub entropy_scale: f64,
     /// Multiplier for pressure percentage (0-100) to produce milliseconds.
     pub pressure_scale: f64,
-}
-
-impl Default for PidConfig {
-    fn default() -> Self {
-        Self {
-            base_ms: 0,
-            entropy_scale: 0.5,
-            pressure_scale: 1.0,
-        }
-    }
 }
 
 impl PidConfig {
@@ -485,6 +479,14 @@ pub fn write_atomic_with_dal(
     guard: &ResourceGuard,
     config: &SniperConfig,
 ) -> Result<(), String> {
+    // Gate: validate file target before any write I/O.
+    // Shared by all entry points (CLI, Python, future) — no duplicated
+    // guards in callers. Checks: regular file, read-only rejection, null-byte scan.
+    let null_warning = security::validate_edit_target(filepath)?;
+    if let Some(warning) = null_warning {
+        eprintln!("[SNIPER] Warning: {warning}");
+    }
+
     // Gate: initial resource check before any I/O (T4/T9)
     guard.check().map_err(|e| format!("resource safety: {e}"))?;
 
@@ -1060,15 +1062,20 @@ mod tests {
 
     #[test]
     fn test_pid_config_sleep_duration_zero_defaults() {
-        let pid = PidConfig::default();
-        // Default: base_ms=0, entropy_scale=0.5, pressure_scale=1.0
+        // SniperConfig defaults: base_ms=0, entropy_scale=0.1, pressure_scale=0.2
+        let pid = PidConfig {
+            base_ms: 0,
+            entropy_scale: 0.1,
+            pressure_scale: 0.2,
+        };
+        // With zero entropy and zero pressure, sleep should be zero
         assert_eq!(pid.sleep_duration(0, 0), Duration::from_millis(0));
-        // 1000 * 0.5 = 500
-        assert_eq!(pid.sleep_duration(1000, 0), Duration::from_millis(500));
-        // 100 * 1.0 = 100
-        assert_eq!(pid.sleep_duration(0, 100), Duration::from_millis(100));
-        // 500 + 50 = 550 (from 1000*0.5 + 50*1.0 = 500 + 50)
-        assert_eq!(pid.sleep_duration(1000, 50), Duration::from_millis(550));
+        // 1000 * 0.1 = 100
+        assert_eq!(pid.sleep_duration(1000, 0), Duration::from_millis(100));
+        // 100 * 0.2 = 20
+        assert_eq!(pid.sleep_duration(0, 100), Duration::from_millis(20));
+        // 100 + 10 = 110 (from 1000*0.1 + 50*0.2 = 100 + 10)
+        assert_eq!(pid.sleep_duration(1000, 50), Duration::from_millis(110));
     }
 
     #[test]

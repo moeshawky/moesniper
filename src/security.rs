@@ -136,6 +136,69 @@ pub fn is_regular_file<P: AsRef<Path>>(path: P) -> bool {
         .unwrap_or(false)
 }
 
+/// Validate that a file target is safe and suitable for editing.
+///
+/// Performs three pre-edit safety checks used by all entry points
+/// (CLI, Python bindings, and any future consumers):
+///
+/// 1. **Regular file check**: Rejects FIFOs, pipes, devices, and other
+///    non-regular files that would block or behave unexpectedly.
+/// 2. **Read-only guard**: Rejects non-empty read-only files to prevent
+///    overwrite failures during atomic rename.
+/// 3. **Null-byte scan**: Reads the first 4 KB of the file and returns
+///    a warning string if null bytes are found (binary file heuristic).
+///    This check is non-blocking — only the first two produce errors.
+///
+/// # Arguments
+/// * `filepath` — Target file path (`AsRef<Path>`). Must exist and be a
+///   regular file for the blocking checks to pass.
+///
+/// # Returns
+/// * `Ok(Some(warning))` — file is safe; an optional null-byte warning.
+/// * `Ok(None)` — file is safe; no warnings.
+/// * `Err(String)` — blocking safety violation (not a regular file, or
+///   read-only non-empty).
+pub fn validate_edit_target<P: AsRef<Path>>(filepath: P) -> Result<Option<String>, String> {
+    let path = filepath.as_ref();
+
+    // Guard 1: block writes into special files (FIFOs, devices, etc.).
+    if !is_regular_file(path) {
+        return Err(
+            "target path is not a regular file (FIFOs, pipes, and devices are not supported)"
+                .into(),
+        );
+    }
+    // Guard 2: refuse to overwrite read-only files via atomic rename.
+    if let Ok(meta) = fs::metadata(path) {
+        if meta.permissions().readonly() && meta.len() > 0 {
+            return Err(format!(
+                "file is read-only: {}. Refusing to overwrite via atomic rename",
+                path.display()
+            ));
+        }
+    }
+    // Guard 3: Scan first 4KB for null bytes (binary file heuristic).
+    // Non-blocking — returns a warning string, not an error.
+    let null_warning = if let Ok(mut f) = fs::File::open(path) {
+        let mut buf = [0u8; 4096];
+        if let Ok(n) = std::io::Read::read(&mut f, &mut buf) {
+            if buf[..n].contains(&0) {
+                Some(format!(
+                    "{:?} contains null bytes — may be binary or corrupted",
+                    path
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    Ok(null_warning)
+}
+
 /// Clean a path by removing redundant components (. and ..).
 fn clean_path(path: &Path) -> PathBuf {
     let mut components: Vec<Component> = Vec::new();

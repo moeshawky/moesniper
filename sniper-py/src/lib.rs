@@ -93,17 +93,24 @@ fn sniper_edit(
     let guard = ResourceGuard::auto(0.5);
     let risk = RiskTelemetry::from_guard(&guard);
 
+    // Resolve path before entering the edit closure so resolved_str is
+    // available to both the closure and the response builder below.
+    let resolved_path = normalize_path(filepath).map_err(PyValueError::new_err)?;
+    let resolved_str = resolved_path
+        .to_str()
+        .ok_or_else(|| PyValueError::new_err("resolved path is not valid UTF-8"))?;
+
     let result = (|| -> Result<_, String> {
-        normalize_path(filepath)?;
-        check_file_size(filepath, config.max_file_size)?;
+        check_file_size(resolved_str, config.max_file_size)?;
         // Gate lock behind dry_run: dry-run reads should not create .sniper/
         let _lock: Option<SniperLock> = if !dry_run.unwrap_or(false) {
-            Some(SniperLock::acquire_with_config(filepath, &config)?)
+            Some(SniperLock::acquire_with_config(resolved_str, &config)?)
         } else {
             None
         };
 
-        let text = fs::read_to_string(filepath).map_err(|e| format!("read {filepath}: {e}"))?;
+        let text =
+            fs::read_to_string(&resolved_path).map_err(|e| format!("read {filepath}: {e}"))?;
         let lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
         if start < 1 || end > lines.len() || start > end + 1 {
@@ -158,7 +165,7 @@ fn sniper_edit(
 
         // Gate backup behind dry_run: dry-run should not create .sniper/ backups
         let bk = if !dry_run.unwrap_or(false) {
-            create_backup(filepath)?
+            create_backup(resolved_str)?
         } else {
             String::new()
         };
@@ -193,8 +200,8 @@ fn sniper_edit(
                 .join("\n");
             Ok((modified.len(), removed, new_lines_len, bk, Some(preview)))
         } else {
-            write_atomic_with_dal(filepath, &refs, &guard, &config)?;
-            let _ = purge_old_backups(filepath, &config);
+            write_atomic_with_dal(resolved_str, &refs, &guard, &config)?;
+            let _ = purge_old_backups(resolved_str, &config);
 
             Ok((modified.len(), removed, new_lines_len, bk, None))
         }
@@ -220,7 +227,7 @@ fn sniper_edit(
             dict.set_item("recommended_action", recommend_from_risk(&risk))?;
 
             let backup_count =
-                count_recent_backups(filepath, config.lock_timeout.as_secs()).unwrap_or(0);
+                count_recent_backups(resolved_str, config.lock_timeout.as_secs()).unwrap_or(0);
             if backup_count >= 3 {
                 dict.set_item(
                     "ai_hint",
@@ -310,12 +317,18 @@ fn sniper_manifest(
     let guard = ResourceGuard::auto(0.5);
     let risk = RiskTelemetry::from_guard(&guard);
 
+    // Resolve path before entering the manifest closure so resolved_str is
+    // available to both the closure and the response builder below.
+    let resolved_path = normalize_path(filepath).map_err(PyValueError::new_err)?;
+    let resolved_str = resolved_path
+        .to_str()
+        .ok_or_else(|| PyValueError::new_err("resolved path is not valid UTF-8"))?;
+
     let result = (|| -> Result<_, String> {
-        normalize_path(filepath)?;
-        check_file_size(filepath, config.max_file_size)?;
+        check_file_size(resolved_str, config.max_file_size)?;
         // Gate lock behind dry_run: dry-run reads should not create .sniper/
         let _lock: Option<SniperLock> = if !dry_run.unwrap_or(false) {
-            Some(SniperLock::acquire_with_config(filepath, &config)?)
+            Some(SniperLock::acquire_with_config(resolved_str, &config)?)
         } else {
             None
         };
@@ -329,7 +342,8 @@ fn sniper_manifest(
             }
         }
 
-        let text = fs::read_to_string(filepath).map_err(|e| handle_backtrack_error(e, "Read"))?;
+        let text =
+            fs::read_to_string(&resolved_path).map_err(|e| handle_backtrack_error(e, "Read"))?;
         let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
 
         ops.sort_by_key(|b| std::cmp::Reverse(b.start));
@@ -347,7 +361,7 @@ fn sniper_manifest(
         }
 
         let bk = if !dry_run.unwrap_or(false) {
-            create_backup(filepath)?
+            create_backup(resolved_str)?
         } else {
             String::new()
         };
@@ -437,8 +451,8 @@ fn sniper_manifest(
 
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         if !dry_run.unwrap_or(false) {
-            write_atomic_with_dal(filepath, &refs, &guard, &config)?;
-            let _ = purge_old_backups(filepath, &config);
+            write_atomic_with_dal(resolved_str, &refs, &guard, &config)?;
+            let _ = purge_old_backups(resolved_str, &config);
         }
 
         Ok((lines.len(), total_removed, total_inserted, ops.len(), bk))
@@ -461,7 +475,7 @@ fn sniper_manifest(
             dict.set_item("recommended_action", recommend_from_risk(&risk))?;
 
             let backup_count =
-                count_recent_backups(filepath, config.lock_timeout.as_secs()).unwrap_or(0);
+                count_recent_backups(resolved_str, config.lock_timeout.as_secs()).unwrap_or(0);
             if backup_count >= 3 {
                 dict.set_item(
                     "ai_hint",

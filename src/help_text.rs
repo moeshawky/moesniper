@@ -9,6 +9,7 @@ USAGE:
     sniper <file> --manifest <path>         Batch operations from JSON
     sniper <file> --undo                    Restore from backup
     sniper encode [--stdin|--file <path>|<text>]  Hex-encode content
+    sniper decode [--stdin|--file <path>|<hex>]   Hex-decode content
     sniper context <file> <start> <end>     Compute context hash for a given line range
 
 FLAGS:
@@ -109,8 +110,8 @@ CONFIGURATION:
     SNIPER_DISABLE_AUDIT            Set to any value to disable audit logging
     SNIPER_DAL_LEVEL              Defense-Ascension Level: Baseline, Enhanced, Maximum (default: Baseline)
     SNIPER_PID_BASE_MS            PID base sleep in milliseconds (default: 0)
-    SNIPER_PID_ENTROPY_SCALE      PID entropy multiplier (default: 0.5)
-    SNIPER_PID_PRESSURE_SCALE     PID pressure multiplier (default: 1.0)
+    SNIPER_PID_ENTROPY_SCALE      PID entropy multiplier (default: 0.1)
+    SNIPER_PID_PRESSURE_SCALE     PID pressure multiplier (default: 0.2)
 
 NOTES:
     - Line numbers: 1-indexed, inclusive on both ends
