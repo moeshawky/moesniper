@@ -293,13 +293,37 @@ pub fn get_path_hash(path: &Path) -> String {
     format!("{:x}", hasher.finish())
 }
 
+/// Returns the backup directory for a given file.
+///
+/// Uses the file's parent directory to keep backups co-located with the
+/// target. Falls back to CWD-relative `.sniper/` when the file parent
+/// is not writable (e.g., read-only system directories).
+fn backup_dir_for(filepath: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_path(filepath)?;
+    let file_parent = normalized.parent().unwrap_or(Path::new("."));
+    let file_dir = file_parent.join(BACKUP_DIR);
+    if file_dir.exists() {
+        return Ok(file_dir);
+    }
+    match fs::create_dir_all(&file_dir) {
+        Ok(()) => Ok(file_dir),
+        Err(_) => {
+            let cwd_dir = PathBuf::from(BACKUP_DIR);
+            fs::create_dir_all(&cwd_dir).map_err(|e| format!("create backup dir: {e}"))?;
+            Ok(cwd_dir)
+        }
+    }
+}
+
 /// Creates a timestamped backup of a file in the backup directory.
+///
+/// Backups are stored in `.sniper/` next to the target file (file-relative),
+/// falling back to the current working directory if the file's parent is
+/// not writable.
 pub fn create_backup(filepath: &str) -> Result<String, String> {
     let normalized = normalize_path(filepath)?;
     let hash = get_path_hash(&normalized);
-
-    let dir = PathBuf::from(BACKUP_DIR);
-    fs::create_dir_all(&dir).map_err(|e| format!("create backup dir: {e}"))?;
+    let dir = backup_dir_for(filepath)?;
 
     let name = normalized
         .file_name()
@@ -332,7 +356,7 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
 
     let normalized = normalize_path(filepath)?;
     let hash = get_path_hash(&normalized);
-    let dir = PathBuf::from(BACKUP_DIR);
+    let dir = backup_dir_for(filepath)?;
 
     if !dir.exists() {
         return Ok(());
@@ -396,7 +420,7 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
 pub fn find_latest_backup(filepath: &str) -> Result<Option<PathBuf>, String> {
     let normalized = normalize_path(filepath)?;
     let hash = get_path_hash(&normalized);
-    let dir = PathBuf::from(BACKUP_DIR);
+    let dir = backup_dir_for(filepath)?;
 
     if !dir.exists() {
         return Ok(None);
@@ -659,7 +683,7 @@ pub fn verify_context(
 pub fn count_recent_backups(filepath: &str, window_secs: u64) -> Result<usize, String> {
     let normalized = normalize_path(filepath)?;
     let hash = get_path_hash(&normalized);
-    let dir = PathBuf::from(BACKUP_DIR);
+    let dir = backup_dir_for(filepath)?;
 
     if !dir.exists() {
         return Ok(0);
@@ -735,7 +759,11 @@ impl SniperLock {
     pub fn acquire_with_config(filepath: &str, config: &SniperConfig) -> Result<Self, String> {
         let normalized = normalize_path(filepath)?;
         let hash = get_path_hash(&normalized);
-        let dir = PathBuf::from(BACKUP_DIR);
+        // File-relative lock directory prevents CWD-scoping bypass where two
+        // processes editing the same file from different working directories
+        // would each create their own .sniper/ and hold separate "locks."
+        let parent_dir = normalized.parent().unwrap_or(Path::new("."));
+        let dir = parent_dir.join(BACKUP_DIR);
         fs::create_dir_all(&dir).map_err(|e| format!("create .sniper: {e}"))?;
         let lock_path = dir.join(format!("sniper.{}.lock", hash));
 
@@ -1708,6 +1736,54 @@ mod tests {
             lock_content.trim(),
             current_pid,
             "lock file should contain current PID after re-acquisition"
+        );
+    }
+
+    // =========================================================================
+    // Adversarial: F-004 failure class (Concurrent Stress — lock path invariant)
+    // =========================================================================
+
+    /// Verify that lock path is derived from the file's directory, not CWD.
+    /// This guards against the CWD-scoping bypass (F-004) where two processes
+    /// editing the same file from different CWDs would each create separate
+    /// `.sniper/` directories and hold non-conflicting locks.
+    #[test]
+    fn test_lock_path_is_file_relative_not_cwd_relative() {
+        let _serial = CWD_MUTEX.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        let _cwd_guard = CwdGuard::new(original_cwd);
+
+        // Create target file in a subdirectory
+        let sub = dir.path().join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let target = sub.join("lock_test.txt");
+        fs::write(&target, "content").unwrap();
+
+        // Run from a different CWD (temp dir root)
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        // The lock should be created in sub/.sniper/, not in CWD/.sniper/
+        let lock =
+            SniperLock::acquire_with_config(target.to_str().unwrap(), &SniperConfig::default());
+        assert!(
+            lock.is_ok(),
+            "Lock acquisition should succeed: {:?}",
+            lock.err()
+        );
+
+        // Verify lock file exists in file-relative directory
+        assert!(
+            sub.join(BACKUP_DIR).exists(),
+            "Lock directory should be at file-relative path sub/.sniper/"
+        );
+        assert!(
+            !PathBuf::from(BACKUP_DIR).exists()
+                || PathBuf::from(BACKUP_DIR)
+                    .read_dir()
+                    .map(|mut d| d.next().is_none())
+                    .unwrap_or(true),
+            "CWD .sniper/ should NOT contain the lock (or should be empty if it existed before)"
         );
     }
 }

@@ -74,8 +74,8 @@ impl Default for SniperConfig {
             audit_enabled: true,
             dal_level: DalLevel::default(),
             pid_base_ms: 0,
-            pid_entropy_scale: 0.5,
-            pid_pressure_scale: 1.0,
+            pid_entropy_scale: 0.1,
+            pid_pressure_scale: 0.2,
         }
     }
 }

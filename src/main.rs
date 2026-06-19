@@ -433,11 +433,30 @@ fn cmd_splice(
         }
     }
 
+    // F-013: Scan first 4KB for null bytes (binary file heuristic).
+    if let Ok(mut f) = fs::File::open(filepath) {
+        use std::io::Read;
+        let mut buf = [0u8; 4096];
+        if let Ok(n) = f.read(&mut buf) {
+            if buf[..n].contains(&0) {
+                eprintln!(
+                    "[SNIPER] Warning: {:?} contains null bytes — may be binary or corrupted",
+                    filepath
+                );
+            }
+        }
+    }
+
     let text = match fs::read_to_string(filepath) {
         Ok(t) => t,
         Err(e) => return err(handle_backtrack_error(e, "Read")),
     };
     let lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
+
+    // F-014: Guard against operations on empty files.
+    if lines.is_empty() && content.is_empty() {
+        return err("file is already empty, nothing to edit".into());
+    }
 
     if let Some(expected) = context_hash {
         if expected.len() != 16 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -482,6 +501,13 @@ fn cmd_splice(
     };
 
     let is_delete = content.is_empty();
+
+    // F-012: Warn when empty hex acts as implicit delete.
+    if is_delete {
+        eprintln!(
+            "[SNIPER] Note: empty hex string acts as --delete. Use --delete flag for clarity."
+        );
+    }
 
     // Handle auto-indent
     let mut indent_fixed = None;
@@ -690,11 +716,35 @@ fn cmd_manifest_impl(
     // Pre-validating here would decode twice — the operation loop catches decode errors
     // at the point of use.
 
+    // F-013: Scan first 4KB for null bytes (binary file heuristic).
+    if let Ok(mut f) = fs::File::open(filepath) {
+        use std::io::Read;
+        let mut buf = [0u8; 4096];
+        if let Ok(n) = f.read(&mut buf) {
+            if buf[..n].contains(&0) {
+                eprintln!(
+                    "[SNIPER] Warning: {:?} contains null bytes — may be binary or corrupted",
+                    filepath
+                );
+            }
+        }
+    }
+
     let text = match fs::read_to_string(filepath) {
         Ok(t) => t,
         Err(e) => return err(handle_backtrack_error(e, "Read")),
     };
     let mut lines: Vec<String> = text.split_inclusive('\n').map(String::from).collect();
+
+    // F-014: Guard against no-op operations on empty files.
+    // Only reject if NO operations actually insert content (all are deletes or empty hex).
+    if lines.is_empty()
+        && !ops
+            .iter()
+            .any(|op| op.hex.as_deref().map_or(false, |h| !h.is_empty()))
+    {
+        return err("file is empty, nothing to edit via manifest".into());
+    }
 
     // Sort bottom-up
     ops.sort_by_key(|b| std::cmp::Reverse(b.start));
@@ -2718,25 +2768,33 @@ mod tests {
 
     #[test]
     fn test_decode_hex_string() {
-        let dir = TempDir::new().unwrap();
-        let path = create_file(&dir, "decode_hex.txt", "a\nb\n");
-        let r = cmd_splice(&path, 1, 1, "48656c6c6f", false, false, false, None);
+        // cmd_decode takes hex, returns decoded text.
+        let r = cmd_decode("48656c6c6f");
         assert_eq!(r.status, "ok");
-        let content = read_file(&path);
-        assert_eq!(content, "Hello\n");
+        assert_eq!(r.message.as_deref(), Some("Hello"));
     }
 
     #[test]
     fn test_decode_invalid_hex() {
-        let dir = TempDir::new().unwrap();
-        let path = create_file(&dir, "decode_bad.txt", "a\nb\n");
-        let r = cmd_splice(&path, 1, 1, "zzzz", false, false, false, None);
+        let r = cmd_decode("zzzz");
         assert_eq!(r.status, "error");
         assert!(
             r.message.as_deref().unwrap().contains("hex decode"),
             "Expected hex decode error, got: {:?}",
             r.message
         );
+    }
+
+    #[test]
+    fn test_splice_with_decoded_hex_content() {
+        // Verify that hex content decoded at CLI level splices correctly.
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "decode_hex.txt", "a\nb\n");
+        let decoded = hex_decode("48656c6c6f").unwrap();
+        let r = cmd_splice(&path, 1, 1, &decoded, false, false, false, None);
+        assert_eq!(r.status, "ok");
+        let content = read_file(&path);
+        assert_eq!(content, "Hello\nb\n");
     }
 
     // =========================================================================
@@ -2772,5 +2830,70 @@ mod tests {
             perms.set_readonly(false);
             fs::set_permissions(&path, perms).unwrap();
         }
+    }
+
+    // =========================================================================
+    // Adversarial: F-014 failure class (Guard-Branch Coverage — empty file)
+    // =========================================================================
+
+    /// Deleting from an empty file must error, not silently succeed.
+    #[test]
+    fn test_empty_file_delete_rejected() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "empty.txt", "");
+        // --delete on empty file
+        let r = cmd_splice(&path, 1, 1, "", false, false, false, None);
+        assert_eq!(r.status, "error", "Delete on empty file must error");
+        assert!(
+            r.message.as_deref().unwrap().contains("already empty"),
+            "Got: {:?}",
+            r.message
+        );
+    }
+
+    /// Inserting into an empty file must work (guard must NOT fire when content exists).
+    #[test]
+    fn test_empty_file_insert_allowed() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "empty.txt", "");
+        let r = cmd_splice(&path, 1, 1, "Hello", false, false, false, None);
+        assert_eq!(r.status, "ok", "Insert into empty file must succeed");
+        let content = read_file(&path);
+        // Empty original file has no trailing newline, so output is "Hello" without \n
+        assert_eq!(content, "Hello");
+    }
+
+    /// Manifest insert into empty file must work (F-014 guard must allow content insertion).
+    #[test]
+    fn test_empty_file_manifest_insert_allowed() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "empty.txt", "");
+        let manifest = r#"[{"start": 1, "end": 1, "hex": "48656c6c6f"}]"#;
+        let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
+        assert_eq!(
+            r.status, "ok",
+            "Manifest insert into empty file: {:?}",
+            r.message
+        );
+        let content = read_file(&path);
+        assert_eq!(content, "Hello");
+    }
+
+    /// Manifest with only deletes on empty file must error.
+    #[test]
+    fn test_empty_file_manifest_delete_rejected() {
+        let dir = TempDir::new().unwrap();
+        let path = create_file(&dir, "empty.txt", "");
+        let manifest = r#"[{"start": 1, "end": 1, "delete": true}]"#;
+        let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
+        assert_eq!(
+            r.status, "error",
+            "Manifest delete on empty file must error"
+        );
+        assert!(
+            r.message.as_deref().unwrap().contains("empty"),
+            "Got: {:?}",
+            r.message
+        );
     }
 }
