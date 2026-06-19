@@ -63,3 +63,4 @@ __pycache__/
 *.so
 deny.toml
 .moegraph/
+publishing.md

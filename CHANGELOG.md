@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.11] - 2026-06-19
+
+### Fixed
+- **Symlink destruction on edit:** `normalize_path` canonicalized path is now propagated to all downstream file operations, resolving symlinks before atomic rename. Editing through a symlink now follows to the target file.
+- **Python binding security parity:** Moved 3 pre-edit guards (regular-file check, read-only check, null-byte scan) into library-layer `validate_edit_target()` called from `write_atomic_with_dal`, protecting all entry points.
+- **PID default documentation drift:** Removed stale `PidConfig::default()` dead code; synced help text defaults (entropy_scale: 0.1, pressure_scale: 0.2) to match `SniperConfig` source of truth.
+- **`sniper decode` undocumented:** Added `sniper decode` subcommand to `--help` USAGE section.
+- **File-relative lock directory:** Locks are now created in the target file's parent directory (`.sniper/`), not CWD, preventing scoping bypass.
+- **Lowered metabolic pacing defaults:** `SNIPER_PID_ENTROPY_SCALE` default changed from 0.5 to 0.1, `SNIPER_PID_PRESSURE_SCALE` from 1.0 to 0.2.
+- **File-relative backup directory:** Backups now use `backup_dir_for()` helper with file-relative paths + CWD fallback for unwritable parents.
+- **Empty hex warning:** Warning emitted on stderr when empty hex string acts as implicit delete.
+- **Null-byte scan:** First 4KB scanned before `read_to_string` for binary file detection (heuristic).
+- **Empty file no-op guard:** Explicit error for delete operations on empty files; insert operations allowed.
+- **Clippy lint:** Replaced `.map_or(false, ...)` with `.is_some_and(...)` at manifest empty-hex check.
+
+### Security
+- **Path sanitization (TOCTOU):** All 5 CLI/Python entry points now propagate canonicalized paths, eliminating path-vs-symlink discrepancy between validation and file operations.
+- **Python binding hardening:** Regular-file check, read-only guard, and null-byte scan now apply to Python bindings via library-layer enforcement.
+- **Lock file recovery edge case:** Documented residual risk from non-PID garbage in lock files (boundary test artifact, not production vector).
+
 ## [0.7.10] - 2026-06-15
 
 ### Fixed
