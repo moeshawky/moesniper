@@ -197,7 +197,7 @@ mod backup_retention_tests {
         let normalized =
             normalize_path(file_path.to_str().unwrap()).expect("Path normalization must succeed");
         let hash = get_path_hash(&normalized);
-        let backup_dir = PathBuf::from(".sniper");
+        let backup_dir = file_path.parent().unwrap().join(".sniper");
         assert!(backup_dir.exists(), "Backup directory must exist");
 
         // Count backups before purge

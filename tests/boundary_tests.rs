@@ -38,7 +38,7 @@ fn test_lock_file_contains_pid() {
     let file_hash = format!("{:x}", hasher.finish());
 
     // Clean any stale lock from previous runs
-    let backup_dir = PathBuf::from(".sniper");
+    let backup_dir = file_path.parent().unwrap().join(".sniper");
     let lock_path = backup_dir.join(format!("sniper.{}.lock", file_hash));
     let _ = fs::remove_file(&lock_path);
 
@@ -79,7 +79,7 @@ fn test_stale_lock_cleaned_on_timeout() {
     normalized.hash(&mut hasher);
     let hash = format!("{:x}", hasher.finish());
 
-    let backup_dir = PathBuf::from(".sniper");
+    let backup_dir = file_path.parent().unwrap().join(".sniper");
     fs::create_dir_all(&backup_dir).unwrap();
     let lock_path = backup_dir.join(format!("sniper.{}.lock", hash));
 
@@ -463,7 +463,7 @@ fn test_manifest_bad_hex_rejected_before_backup() {
     fs::write(&file_path, "original\n").unwrap();
 
     // Count backups before
-    let backup_dir = PathBuf::from(".sniper");
+    let backup_dir = file_path.parent().unwrap().join(".sniper");
     let _initial_backups = if backup_dir.exists() {
         fs::read_dir(&backup_dir).unwrap().count()
     } else {
@@ -557,7 +557,7 @@ fn test_concurrent_backup_and_purge() {
     normalized.hash(&mut hasher);
     let hash = format!("{:x}", hasher.finish());
 
-    let backup_dir = PathBuf::from(".sniper");
+    let backup_dir = file_path.parent().unwrap().join(".sniper");
     if backup_dir.exists() {
         let count = fs::read_dir(&backup_dir)
             .unwrap()
