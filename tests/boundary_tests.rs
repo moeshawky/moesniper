@@ -133,7 +133,12 @@ fn test_temp_files_use_unique_names() {
         "No temp files should exist before write_atomic"
     );
 
-    write_atomic(file1.to_str().unwrap(), &["a", "b"]).unwrap();
+    write_atomic(
+        file1.to_str().unwrap(),
+        &["a", "b"],
+        &SniperConfig::default(),
+    )
+    .unwrap();
 
     // Check for temp files left behind
     let tmp_files_after: Vec<_> = fs::read_dir(&subdir)
@@ -159,7 +164,12 @@ fn test_temp_file_name_contains_timestamp() {
 
     for i in 0..20 {
         fs::write(&file, format!("v{}\n", i)).unwrap();
-        write_atomic(file.to_str().unwrap(), &[&format!("v{}", i + 1)]).unwrap();
+        write_atomic(
+            file.to_str().unwrap(),
+            &[&format!("v{}", i + 1)],
+            &SniperConfig::default(),
+        )
+        .unwrap();
         let content = read_file(&file);
         assert_eq!(content, format!("v{}\n", i + 1), "Write {} must succeed", i);
     }
@@ -388,7 +398,11 @@ fn test_check_file_size_permission_denied() {
 
 #[test]
 fn test_write_atomic_readonly_dir() {
-    let result = write_atomic("/proc/sniper_immutable_test", &["should fail"]);
+    let result = write_atomic(
+        "/proc/sniper_immutable_test",
+        &["should fail"],
+        &SniperConfig::default(),
+    );
     assert!(
         result.is_err(),
         "Write to /proc must fail: got {:?}",
@@ -602,7 +616,12 @@ fn test_write_atomic_preserves_trailing_newline() {
 
     // File WITH trailing newline
     fs::write(&file, "original\n").unwrap();
-    write_atomic(file.to_str().unwrap(), &["modified"]).unwrap();
+    write_atomic(
+        file.to_str().unwrap(),
+        &["modified"],
+        &SniperConfig::default(),
+    )
+    .unwrap();
     let content = read_file(&file);
     assert_eq!(content, "modified\n", "Must preserve trailing newline");
 }
@@ -614,7 +633,12 @@ fn test_write_atomic_preserves_missing_trailing_newline() {
 
     // File WITHOUT trailing newline
     fs::write(&file, "original").unwrap();
-    write_atomic(file.to_str().unwrap(), &["modified"]).unwrap();
+    write_atomic(
+        file.to_str().unwrap(),
+        &["modified"],
+        &SniperConfig::default(),
+    )
+    .unwrap();
     let content = read_file(&file);
     assert_eq!(
         content, "modified",
@@ -630,7 +654,12 @@ fn test_write_atomic_multiline_preserves_trailing_newline() {
 
     // Multiple lines with trailing newline
     fs::write(&file, "line1\nline2\n").unwrap();
-    write_atomic(file.to_str().unwrap(), &["a", "b", "c"]).unwrap();
+    write_atomic(
+        file.to_str().unwrap(),
+        &["a", "b", "c"],
+        &SniperConfig::default(),
+    )
+    .unwrap();
     let content = read_file(&file);
     assert_eq!(
         content, "a\nb\nc\n",
@@ -644,7 +673,12 @@ fn test_write_atomic_multiline_no_trailing_newline() {
     let file = dir.path().join("tnl_multi_no.txt");
 
     fs::write(&file, "line1\nline2").unwrap();
-    write_atomic(file.to_str().unwrap(), &["a", "b", "c"]).unwrap();
+    write_atomic(
+        file.to_str().unwrap(),
+        &["a", "b", "c"],
+        &SniperConfig::default(),
+    )
+    .unwrap();
     let content = read_file(&file);
     assert_eq!(
         content, "a\nb\nc",
@@ -659,7 +693,7 @@ fn test_write_atomic_empty_file() {
     let file = dir.path().join("empty_out.txt");
 
     fs::write(&file, "").unwrap();
-    write_atomic(file.to_str().unwrap(), &["hello"]).unwrap();
+    write_atomic(file.to_str().unwrap(), &["hello"], &SniperConfig::default()).unwrap();
     let content = read_file(&file);
     assert_eq!(
         content, "hello",

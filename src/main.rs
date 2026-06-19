@@ -504,7 +504,7 @@ fn cmd_splice(
     let lines_refs: Vec<&str> = modified_lines.iter().map(|s| s.as_str()).collect();
 
     // Use pre-computed guard, risk, and dal_level from config above
-    if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, config.dal_level) {
+    if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, &config) {
         return err(e);
     }
 
@@ -767,9 +767,7 @@ fn cmd_manifest_impl(
 
     if !dry_run {
         // T6: Use write_atomic_with_dal with guard
-        if let Err(e) =
-            write_atomic_with_dal(filepath, &lines_refs, &guard, config.dal_level)
-        {
+        if let Err(e) = write_atomic_with_dal(filepath, &lines_refs, &guard, &config) {
             return err(e);
         }
         if let Err(e) = purge_old_backups(filepath, &config) {
@@ -1566,7 +1564,11 @@ mod tests {
         let original_cwd = std::env::current_dir().unwrap();
         let _cwd_guard = {
             struct Guard(PathBuf);
-            impl Drop for Guard { fn drop(&mut self) { let _ = std::env::set_current_dir(&self.0); } }
+            impl Drop for Guard {
+                fn drop(&mut self) {
+                    let _ = std::env::set_current_dir(&self.0);
+                }
+            }
             let g = Guard(original_cwd);
             std::env::set_current_dir(dir.path()).unwrap();
             g
@@ -1574,7 +1576,10 @@ mod tests {
 
         let sniper_dir = dir.path().join(".sniper");
         // Verify .sniper/ does NOT exist before dry-run
-        assert!(!sniper_dir.exists(), ".sniper/ should not exist before dry-run");
+        assert!(
+            !sniper_dir.exists(),
+            ".sniper/ should not exist before dry-run"
+        );
 
         let path = create_file(&dir, "dry_test.txt", "line1\nline2\nline3\n");
         let r = cmd_splice(&path, 2, 2, "7878", true, false, false, None);
@@ -1595,7 +1600,11 @@ mod tests {
         let original_cwd = std::env::current_dir().unwrap();
         let _cwd_guard = {
             struct Guard(PathBuf);
-            impl Drop for Guard { fn drop(&mut self) { let _ = std::env::set_current_dir(&self.0); } }
+            impl Drop for Guard {
+                fn drop(&mut self) {
+                    let _ = std::env::set_current_dir(&self.0);
+                }
+            }
             let g = Guard(original_cwd);
             std::env::set_current_dir(dir.path()).unwrap();
             g
@@ -1628,13 +1637,25 @@ mod tests {
         assert_eq!(r.status, "dry_run");
 
         // risk must be None for dry-run (was the original bug fixed in 2c54f29)
-        assert!(r.risk.is_none(), "BUG: dry-run leaks risk telemetry in result struct");
-        assert!(r.recommended_action.is_none(), "BUG: dry-run leaks recommended_action in result struct");
+        assert!(
+            r.risk.is_none(),
+            "BUG: dry-run leaks risk telemetry in result struct"
+        );
+        assert!(
+            r.recommended_action.is_none(),
+            "BUG: dry-run leaks recommended_action in result struct"
+        );
 
         let json = serde_json::to_string(&r).unwrap();
         // The JSON output for --json should not contain risk fields
-        assert!(!json.contains("\"risk\""), "BUG: dry-run JSON contains 'risk' field");
-        assert!(!json.contains("\"recommended_action\""), "BUG: dry-run JSON contains 'recommended_action' field");
+        assert!(
+            !json.contains("\"risk\""),
+            "BUG: dry-run JSON contains 'risk' field"
+        );
+        assert!(
+            !json.contains("\"recommended_action\""),
+            "BUG: dry-run JSON contains 'recommended_action' field"
+        );
     }
 
     /// Manifest dry-run JSON output must NOT contain risk telemetry.
@@ -1642,15 +1663,28 @@ mod tests {
     fn test_manifest_dry_run_json_excludes_risk_telemetry() {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "manifest_dry_risk.txt", "a\nb\nc\n");
-        let manifest_path = create_file(&dir, "ops.json", r#"[{"start": 1, "end": 1, "hex": "78"}]"#);
+        let manifest_path =
+            create_file(&dir, "ops.json", r#"[{"start": 1, "end": 1, "hex": "78"}]"#);
         let r = cmd_manifest(&path, Some(&manifest_path), true, false, false, None);
         assert_eq!(r.status, "dry_run");
-        assert!(r.risk.is_none(), "BUG: manifest dry-run leaks risk telemetry");
-        assert!(r.recommended_action.is_none(), "BUG: manifest dry-run leaks recommended_action");
+        assert!(
+            r.risk.is_none(),
+            "BUG: manifest dry-run leaks risk telemetry"
+        );
+        assert!(
+            r.recommended_action.is_none(),
+            "BUG: manifest dry-run leaks recommended_action"
+        );
 
         let json = serde_json::to_string(&r).unwrap();
-        assert!(!json.contains("\"risk\""), "BUG: manifest dry-run JSON contains 'risk'");
-        assert!(!json.contains("\"recommended_action\""), "BUG: manifest dry-run JSON contains 'recommended_action'");
+        assert!(
+            !json.contains("\"risk\""),
+            "BUG: manifest dry-run JSON contains 'risk'"
+        );
+        assert!(
+            !json.contains("\"recommended_action\""),
+            "BUG: manifest dry-run JSON contains 'recommended_action'"
+        );
     }
 
     /// Dry-run followed by real edit: file state must be correct.
@@ -1684,15 +1718,17 @@ mod tests {
         let path = create_file(&dir, "man_dry_then_real.txt", "a\nb\nc\nd\n");
         let original = read_file(&path);
 
-        let manifest_path = create_file(
-            &dir, "ops.json",
-            r#"[{"start": 2, "end": 2, "hex": "78"}]"#,
-        );
+        let manifest_path =
+            create_file(&dir, "ops.json", r#"[{"start": 2, "end": 2, "hex": "78"}]"#);
 
         // Dry-run
         let r_dry = cmd_manifest(&path, Some(&manifest_path), true, false, false, None);
         assert_eq!(r_dry.status, "dry_run");
-        assert_eq!(read_file(&path), original, "manifest dry-run modified the file!");
+        assert_eq!(
+            read_file(&path),
+            original,
+            "manifest dry-run modified the file!"
+        );
 
         // Real manifest edit
         let r_real = cmd_manifest(&path, Some(&manifest_path), false, false, false, None);
@@ -1817,7 +1853,10 @@ mod tests {
             None,
         );
         // Currently sniper requires existing files; creation is not supported by cmd_splice
-        assert_eq!(r.status, "error", "Editing nonexistent file must return error, not crash");
+        assert_eq!(
+            r.status, "error",
+            "Editing nonexistent file must return error, not crash"
+        );
     }
 
     // =========================================================================
@@ -1836,12 +1875,17 @@ mod tests {
 
         // Undo — must fail gracefully (no backup exists)
         let r_undo = cmd_undo(&path);
-        assert_eq!(r_undo.status, "error",
+        assert_eq!(
+            r_undo.status, "error",
             "BUG: undo after dry-run only should error, got status={}",
             r_undo.status
         );
         assert!(
-            r_undo.message.as_deref().unwrap_or("").contains("no backup"),
+            r_undo
+                .message
+                .as_deref()
+                .unwrap_or("")
+                .contains("no backup"),
             "BUG: undo error should mention 'no backup', got: {:?}",
             r_undo.message
         );
@@ -1858,7 +1902,8 @@ mod tests {
         let original = read_file(&path);
 
         let r = cmd_undo(&path);
-        assert_eq!(r.status, "error",
+        assert_eq!(
+            r.status, "error",
             "BUG: undo on never-edited file should error, got status={}",
             r.status
         );
@@ -1890,12 +1935,17 @@ mod tests {
 
         // Second undo — must fail (backup already consumed)
         let r_undo2 = cmd_undo(&path);
-        assert_eq!(r_undo2.status, "error",
+        assert_eq!(
+            r_undo2.status, "error",
             "BUG: second undo should fail (backup already consumed), got status={}",
             r_undo2.status
         );
         assert!(
-            r_undo2.message.as_deref().unwrap_or("").contains("no backup"),
+            r_undo2
+                .message
+                .as_deref()
+                .unwrap_or("")
+                .contains("no backup"),
             "BUG: second undo should report 'no backup', got: {:?}",
             r_undo2.message
         );
@@ -1945,7 +1995,11 @@ mod tests {
         let original_cwd = std::env::current_dir().unwrap();
         let _cwd_guard = {
             struct Guard(PathBuf);
-            impl Drop for Guard { fn drop(&mut self) { let _ = std::env::set_current_dir(&self.0); } }
+            impl Drop for Guard {
+                fn drop(&mut self) {
+                    let _ = std::env::set_current_dir(&self.0);
+                }
+            }
             let g = Guard(original_cwd);
             std::env::set_current_dir(dir.path()).unwrap();
             g
@@ -1953,7 +2007,8 @@ mod tests {
 
         let path = create_file(&dir, "man_dry_nobackup.txt", "a\nb\nc\n");
         let manifest_path = create_file(
-            &dir, "ops.json",
+            &dir,
+            "ops.json",
             r#"[{"start": 2, "end": 2, "delete": true}]"#,
         );
 
@@ -1977,7 +2032,11 @@ mod tests {
 
         let r = cmd_splice(&path, 2, 2, "", true, false, false, None);
         assert_eq!(r.status, "dry_run");
-        assert_eq!(read_file(&path), original, "BUG: dry-run delete modified the file!");
+        assert_eq!(
+            read_file(&path),
+            original,
+            "BUG: dry-run delete modified the file!"
+        );
     }
 
     // =========================================================================
@@ -1998,16 +2057,34 @@ mod tests {
         // Required fields for dry_run status
         assert_eq!(v["status"], "dry_run");
         assert!(v.get("file").is_some(), "dry-run must include 'file' field");
-        assert!(v.get("lines_removed").is_some(), "dry-run must include 'lines_removed'");
-        assert!(v.get("lines_inserted").is_some(), "dry-run must include 'lines_inserted'");
+        assert!(
+            v.get("lines_removed").is_some(),
+            "dry-run must include 'lines_removed'"
+        );
+        assert!(
+            v.get("lines_inserted").is_some(),
+            "dry-run must include 'lines_inserted'"
+        );
         assert!(v.get("ai_hint").is_some(), "dry-run must include 'ai_hint'");
-        assert!(v.get("line_shift").is_some(), "dry-run must include 'line_shift'");
+        assert!(
+            v.get("line_shift").is_some(),
+            "dry-run must include 'line_shift'"
+        );
 
         // Forbidden fields for dry_run
         assert!(v.get("risk").is_none(), "BUG: dry-run JSON contains 'risk'");
-        assert!(v.get("recommended_action").is_none(), "BUG: dry-run JSON contains 'recommended_action'");
-        assert!(v.get("backup").is_none(), "BUG: dry-run JSON contains 'backup'");
-        assert!(v.get("total_lines").is_none(), "BUG: dry-run JSON contains 'total_lines'");
+        assert!(
+            v.get("recommended_action").is_none(),
+            "BUG: dry-run JSON contains 'recommended_action'"
+        );
+        assert!(
+            v.get("backup").is_none(),
+            "BUG: dry-run JSON contains 'backup'"
+        );
+        assert!(
+            v.get("total_lines").is_none(),
+            "BUG: dry-run JSON contains 'total_lines'"
+        );
     }
 
     /// Full JSON output for manifest dry-run must be correct.
@@ -2016,7 +2093,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "man_dry_schema.txt", "a\nb\nc\nd\n");
         let manifest_path = create_file(
-            &dir, "ops.json",
+            &dir,
+            "ops.json",
             r#"[{"start": 2, "end": 2, "hex": "78"}, {"start": 4, "end": 4, "delete": true}]"#,
         );
 
@@ -2027,13 +2105,28 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
 
         assert_eq!(v["status"], "dry_run");
-        assert!(v.get("operations").is_some(), "manifest dry-run must include 'operations'");
-        assert!(v.get("manifest_ops").is_some(), "manifest dry-run must include 'manifest_ops'");
+        assert!(
+            v.get("operations").is_some(),
+            "manifest dry-run must include 'operations'"
+        );
+        assert!(
+            v.get("manifest_ops").is_some(),
+            "manifest dry-run must include 'manifest_ops'"
+        );
 
         // Forbidden for dry_run
-        assert!(v.get("risk").is_none(), "BUG: manifest dry-run JSON contains 'risk'");
-        assert!(v.get("recommended_action").is_none(), "BUG: manifest dry-run JSON contains 'recommended_action'");
-        assert!(v.get("backup").is_none(), "BUG: manifest dry-run JSON contains 'backup'");
+        assert!(
+            v.get("risk").is_none(),
+            "BUG: manifest dry-run JSON contains 'risk'"
+        );
+        assert!(
+            v.get("recommended_action").is_none(),
+            "BUG: manifest dry-run JSON contains 'recommended_action'"
+        );
+        assert!(
+            v.get("backup").is_none(),
+            "BUG: manifest dry-run JSON contains 'backup'"
+        );
     }
 
     // =========================================================================
@@ -2055,9 +2148,12 @@ mod tests {
             assert_eq!(content, "X\na\nb\nc\n",
                 "CLI allows start=1,end=0 as insert-before-line-1. Python rejects (end<start). Inconsistency?");
         } else {
-            assert!(r.message.as_deref().unwrap().contains("out of bounds")
-                || r.message.as_deref().unwrap().contains("invalid"),
-                "Expected bounds error if rejected. Got: {:?}", r.message);
+            assert!(
+                r.message.as_deref().unwrap().contains("out of bounds")
+                    || r.message.as_deref().unwrap().contains("invalid"),
+                "Expected bounds error if rejected. Got: {:?}",
+                r.message
+            );
         }
     }
 
@@ -2070,11 +2166,17 @@ mod tests {
         let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
         if r.status == "ok" {
             let content = read_file(&path);
-            assert_eq!(content, "X\na\nb\nc\n",
-                "Manifest start=1,end=0 inserts before line 1. Got: {:?}", content);
+            assert_eq!(
+                content, "X\na\nb\nc\n",
+                "Manifest start=1,end=0 inserts before line 1. Got: {:?}",
+                content
+            );
         } else {
-            assert!(r.message.as_deref().unwrap().contains("out of bounds"),
-                "Expected bounds error. Got: {:?}", r.message);
+            assert!(
+                r.message.as_deref().unwrap().contains("out of bounds"),
+                "Expected bounds error. Got: {:?}",
+                r.message
+            );
         }
     }
 
@@ -2085,11 +2187,17 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "empty_insert.txt", "");
         let r = cmd_splice(&path, 1, 1, "X", false, false, false, None);
-        assert_eq!(r.status, "ok",
-            "Insert into empty file should succeed via insert-at-end exception. Got: {:?}", r.message);
+        assert_eq!(
+            r.status, "ok",
+            "Insert into empty file should succeed via insert-at-end exception. Got: {:?}",
+            r.message
+        );
         let content = read_file(&path);
-        assert_eq!(content, "X",
-            "Empty file + hex 58 should produce 'X' (no trailing nl). Got: {:?}", content);
+        assert_eq!(
+            content, "X",
+            "Empty file + hex 58 should produce 'X' (no trailing nl). Got: {:?}",
+            content
+        );
     }
 
     /// BUG PROBE: manifest insert into empty file
@@ -2099,8 +2207,11 @@ mod tests {
         let path = create_file(&dir, "mf_empty.txt", "");
         let manifest = r#"[{"start": 1, "end": 1, "hex": "58"}]"#;
         let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
-        assert_eq!(r.status, "ok",
-            "Manifest insert into empty file. Got: {:?}", r.message);
+        assert_eq!(
+            r.status, "ok",
+            "Manifest insert into empty file. Got: {:?}",
+            r.message
+        );
         let content = read_file(&path);
         assert_eq!(content, "X", "Expected 'X'. Got: {:?}", content);
     }
@@ -2111,11 +2222,17 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "del_all.txt", "a\nb\nc\n");
         let r = cmd_splice(&path, 1, 3, "", false, false, false, None);
-        assert_eq!(r.status, "ok",
-            "Delete all lines should succeed. Got: {:?}", r.message);
+        assert_eq!(
+            r.status, "ok",
+            "Delete all lines should succeed. Got: {:?}",
+            r.message
+        );
         let content = read_file(&path);
-        assert_eq!(content, "",
-            "Deleting all lines from file with trailing newline leaves empty file. Got: {:?}", content);
+        assert_eq!(
+            content, "",
+            "Deleting all lines from file with trailing newline leaves empty file. Got: {:?}",
+            content
+        );
     }
 
     /// BUG PROBE: delete all lines from file without trailing newline
@@ -2124,11 +2241,17 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "del_all_no.txt", "a\nb");
         let r = cmd_splice(&path, 1, 2, "", false, false, false, None);
-        assert_eq!(r.status, "ok",
-            "Delete all lines from no-trailing-nl file. Got: {:?}", r.message);
+        assert_eq!(
+            r.status, "ok",
+            "Delete all lines from no-trailing-nl file. Got: {:?}",
+            r.message
+        );
         let content = read_file(&path);
-        assert_eq!(content, "",
-            "Deleting all lines from file without trailing newline leaves empty file. Got: {:?}", content);
+        assert_eq!(
+            content, "",
+            "Deleting all lines from file without trailing newline leaves empty file. Got: {:?}",
+            content
+        );
     }
 
     /// BUG PROBE: delete last line from file with trailing newline
@@ -2139,8 +2262,11 @@ mod tests {
         let r = cmd_splice(&path, 2, 2, "", false, false, false, None);
         assert_eq!(r.status, "ok");
         let content = read_file(&path);
-        assert_eq!(content, "a\n",
-            "Delete last line of file with trailing newline. Got: {:?}", content);
+        assert_eq!(
+            content, "a\n",
+            "Delete last line of file with trailing newline. Got: {:?}",
+            content
+        );
     }
 
     /// BUG PROBE: delete last line from file WITHOUT trailing newline
@@ -2151,8 +2277,11 @@ mod tests {
         let r = cmd_splice(&path, 2, 2, "", false, false, false, None);
         assert_eq!(r.status, "ok");
         let content = read_file(&path);
-        assert_eq!(content, "a",
-            "Delete last line of file without trailing newline. Got: {:?}", content);
+        assert_eq!(
+            content, "a",
+            "Delete last line of file without trailing newline. Got: {:?}",
+            content
+        );
     }
 
     /// BUG PROBE: end beyond file length (end > lines.len())
@@ -2163,10 +2292,16 @@ mod tests {
         // 1-line file. start=1, end=2: end>len (2>1) — bounds check should catch
         let r = cmd_splice(&path, 1, 2, "X", false, false, false, None);
         // insert-at-end exception: start==len+1? 1==2? No. So error.
-        assert_eq!(r.status, "error",
-            "end=2 beyond file length 1 should be rejected. Got status: {}", r.status);
-        assert!(r.message.as_deref().unwrap().contains("out of bounds"),
-            "Expected out-of-bounds, got: {:?}", r.message);
+        assert_eq!(
+            r.status, "error",
+            "end=2 beyond file length 1 should be rejected. Got status: {}",
+            r.status
+        );
+        assert!(
+            r.message.as_deref().unwrap().contains("out of bounds"),
+            "Expected out-of-bounds, got: {:?}",
+            r.message
+        );
     }
 
     /// BUG PROBE: start beyond length, end valid (start > end+1)
@@ -2176,8 +2311,11 @@ mod tests {
         let path = create_file(&dir, "sbeyond.txt", "a\nb\n");
         // start=10, end=2: start>end+1 (10>3) → error
         let r = cmd_splice(&path, 10, 2, "X", false, false, false, None);
-        assert_eq!(r.status, "error",
-            "start=10 > end+1=3 should reject. Got: {:?}", r.message);
+        assert_eq!(
+            r.status, "error",
+            "start=10 > end+1=3 should reject. Got: {:?}",
+            r.message
+        );
     }
 
     /// BUG PROBE: start=2, end=0 (start > end+1)
@@ -2187,8 +2325,11 @@ mod tests {
         let path = create_file(&dir, "s2e0.txt", "a\nb\nc\n");
         // start=2, end=0: start>end+1 → 2>1 → true → error
         let r = cmd_splice(&path, 2, 0, "X", false, false, false, None);
-        assert_eq!(r.status, "error",
-            "start=2,end=0: start>end+1 should reject. Got: {:?}", r.message);
+        assert_eq!(
+            r.status, "error",
+            "start=2,end=0: start>end+1 should reject. Got: {:?}",
+            r.message
+        );
     }
 
     /// BUG PROBE: insert at very end (append)
@@ -2198,11 +2339,17 @@ mod tests {
         let path = create_file(&dir, "append.txt", "a\n");
         // lines.len()=1. start=2,end=2: insert-at-end exception fires
         let r = cmd_splice(&path, 2, 2, "b", false, false, false, None);
-        assert_eq!(r.status, "ok",
-            "Append at end (start=2,end=2 on 1-line file). Got: {:?}", r.message);
+        assert_eq!(
+            r.status, "ok",
+            "Append at end (start=2,end=2 on 1-line file). Got: {:?}",
+            r.message
+        );
         let content = read_file(&path);
-        assert_eq!(content, "a\nb\n",
-            "Append should add line with trailing newline. Got: {:?}", content);
+        assert_eq!(
+            content, "a\nb\n",
+            "Append should add line with trailing newline. Got: {:?}",
+            content
+        );
     }
 
     /// BUG PROBE: single line file without trailing newline
@@ -2213,8 +2360,11 @@ mod tests {
         let r = cmd_splice(&path, 1, 1, "new", false, false, false, None);
         assert_eq!(r.status, "ok");
         let content = read_file(&path);
-        assert_eq!(content, "new",
-            "Single-line no-nl: should preserve no trailing newline. Got: {:?}", content);
+        assert_eq!(
+            content, "new",
+            "Single-line no-nl: should preserve no trailing newline. Got: {:?}",
+            content
+        );
     }
 
     // =========================================================================
@@ -2228,10 +2378,16 @@ mod tests {
         let path = create_file(&dir, "mf_zero.txt", "a\nb\n");
         let manifest = r#"[{"start": 0, "end": 1, "delete": true}]"#;
         let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
-        assert_eq!(r.status, "error",
-            "Manifest start=0 must be rejected (1-indexed). Got: {:?}", r.message);
-        assert!(r.message.as_deref().unwrap().contains("out of bounds"),
-            "Expected bounds error, got: {:?}", r.message);
+        assert_eq!(
+            r.status, "error",
+            "Manifest start=0 must be rejected (1-indexed). Got: {:?}",
+            r.message
+        );
+        assert!(
+            r.message.as_deref().unwrap().contains("out of bounds"),
+            "Expected bounds error, got: {:?}",
+            r.message
+        );
     }
 
     /// BUG PROBE: manifest silent no-op — operation with neither delete nor hex
@@ -2242,10 +2398,19 @@ mod tests {
         let manifest = r#"[{"start": 1, "end": 1}]"#;
         let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
         // The operation has no hex and no delete — now correctly returns error (fixed)
-        assert_eq!(r.status, "error",
-            "Silent no-op: op with no hex and no delete must return error. Fixed. Status: {}", r.status);
-        assert_eq!(r.lines_removed, 0, "No lines should be removed in silent no-op");
-        assert_eq!(r.lines_inserted, 0, "No lines should be inserted in silent no-op");
+        assert_eq!(
+            r.status, "error",
+            "Silent no-op: op with no hex and no delete must return error. Fixed. Status: {}",
+            r.status
+        );
+        assert_eq!(
+            r.lines_removed, 0,
+            "No lines should be removed in silent no-op"
+        );
+        assert_eq!(
+            r.lines_inserted, 0,
+            "No lines should be inserted in silent no-op"
+        );
     }
 
     /// BUG PROBE: two manifest ops at same start line (NOW REJECTED WITH ERROR)
@@ -2261,10 +2426,19 @@ mod tests {
         ]"#;
         let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
         // F5 fix: same-start operations now produce an error, not silent corruption
-        assert_eq!(r.status, "error",
-            "Expected error for same-start manifest ops, got status={}", r.status);
-        assert!(r.message.as_deref().unwrap().contains("overlapping manifest operations"),
-            "Expected 'overlapping manifest operations' error, got: {:?}", r.message);
+        assert_eq!(
+            r.status, "error",
+            "Expected error for same-start manifest ops, got status={}",
+            r.status
+        );
+        assert!(
+            r.message
+                .as_deref()
+                .unwrap()
+                .contains("overlapping manifest operations"),
+            "Expected 'overlapping manifest operations' error, got: {:?}",
+            r.message
+        );
     }
 
     /// BUG PROBE: manifest context verification now uses pre-loop gate (F6 FIX)
@@ -2297,9 +2471,12 @@ mod tests {
 
         let r = cmd_manifest_impl(&path, &manifest, false, false, false, Some(short_hash));
         // F6 fix: pre-manifest gate verifies against first op (start=6), hash matches → ok
-        assert_eq!(r.status, "ok",
+        assert_eq!(
+            r.status, "ok",
             "Pre-manifest context gate should pass (hash matches first op). \
-             Status={}, msg={:?}", r.status, r.message);
+             Status={}, msg={:?}",
+            r.status, r.message
+        );
     }
 
     /// BUG PROBE: single-op manifest context verification should work correctly
@@ -2316,8 +2493,11 @@ mod tests {
         // Single operation — context verification should match
         let manifest = format!(r#"[{{"start": 3, "end": 3, "hex": "4e4557"}}]"#);
         let r = cmd_manifest_impl(&path, &manifest, false, false, false, Some(short_hash));
-        assert_eq!(r.status, "ok",
-            "Single-op manifest with correct context hash should succeed. Got: {:?}", r.message);
+        assert_eq!(
+            r.status, "ok",
+            "Single-op manifest with correct context hash should succeed. Got: {:?}",
+            r.message
+        );
     }
 
     /// BUG PROBE: manifest context with WRONG hash must fail
@@ -2326,11 +2506,24 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_file(&dir, "mf_ctxbad.txt", "a\nb\nc\nd\ne\nf\ng\nh\n");
         let manifest = r#"[{"start": 3, "end": 3, "hex": "4e4557"}]"#;
-        let r = cmd_manifest_impl(&path, manifest, false, false, false, Some("0000000000000000"));
-        assert_eq!(r.status, "error",
-            "Wrong context hash should fail. Got: {:?}", r.message);
-        assert!(r.message.as_deref().unwrap().contains("context mismatch"),
-            "Expected context mismatch, got: {:?}", r.message);
+        let r = cmd_manifest_impl(
+            &path,
+            manifest,
+            false,
+            false,
+            false,
+            Some("0000000000000000"),
+        );
+        assert_eq!(
+            r.status, "error",
+            "Wrong context hash should fail. Got: {:?}",
+            r.message
+        );
+        assert!(
+            r.message.as_deref().unwrap().contains("context mismatch"),
+            "Expected context mismatch, got: {:?}",
+            r.message
+        );
     }
 
     /// BUG PROBE: manifest with both delete and hex must be rejected
@@ -2340,10 +2533,19 @@ mod tests {
         let path = create_file(&dir, "mf_both.txt", "a\nb\n");
         let manifest = r#"[{"start": 1, "end": 1, "delete": true, "hex": "58"}]"#;
         let r = cmd_manifest_impl(&path, manifest, false, false, false, None);
-        assert_eq!(r.status, "error",
-            "Both delete and hex in same op must be rejected. Got: {:?}", r.message);
-        assert!(r.message.as_deref().unwrap().contains("Cannot both delete and insert"),
-            "Expected 'Cannot both delete and insert', got: {:?}", r.message);
+        assert_eq!(
+            r.status, "error",
+            "Both delete and hex in same op must be rejected. Got: {:?}",
+            r.message
+        );
+        assert!(
+            r.message
+                .as_deref()
+                .unwrap()
+                .contains("Cannot both delete and insert"),
+            "Expected 'Cannot both delete and insert', got: {:?}",
+            r.message
+        );
     }
 
     // =========================================================================
@@ -2363,7 +2565,9 @@ mod tests {
         // Rust cmd_splice: checks `end > lines.len()` → 4 > 3 → true → REJECTS
         // (unless start == lines.len()+1 which it's not)
         let r = cmd_splice(&path, 2, 4, "new", false, false, false, None);
-        assert_eq!(r.status, "error",
-            "Rust rejects end=lines.len()+1 when start < lines.len()+1 (Python allows this)");
+        assert_eq!(
+            r.status, "error",
+            "Rust rejects end=lines.len()+1 when start < lines.len()+1 (Python allows this)"
+        );
     }
 }

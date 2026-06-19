@@ -363,7 +363,12 @@ mod compound_security_tests {
 
         // Write new content atomically
         let write_lines: Vec<&str> = new_lines.iter().map(|s| s.as_str()).collect();
-        write_atomic(file_path.to_str().unwrap(), &write_lines).expect("Atomic write must succeed");
+        write_atomic(
+            file_path.to_str().unwrap(),
+            &write_lines,
+            &SniperConfig::default(),
+        )
+        .expect("Atomic write must succeed");
 
         // Verify file has correct content — not partial
         let content = fs::read_to_string(&file_path).unwrap();

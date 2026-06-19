@@ -9,8 +9,9 @@ use llmosafe::ResourceGuard;
 use moesniper::{
     auto_indent_content, check_file_size, count_recent_backups, create_backup, find_latest_backup,
     generate_preview, handle_backtrack_error, hex_decode, hex_encode, needs_indent_fix,
-    normalize_path, purge_old_backups, recommend_from_risk, validate_indentation, verify_context,
-    write_atomic_with_dal, ManifestOp, RiskTelemetry, SniperConfig, SniperLock, NAME, VERSION,
+    normalize_path, purge_old_backups, recommend_from_risk, split_file_lines, validate_indentation,
+    verify_context, write_atomic_with_dal, ManifestOp, RiskTelemetry, SniperConfig, SniperLock,
+    NAME, VERSION,
 };
 
 /// Python bindings for moesniper — escape-proof precision file editing.
@@ -192,7 +193,7 @@ fn sniper_edit(
                 .join("\n");
             Ok((modified.len(), removed, new_lines_len, bk, Some(preview)))
         } else {
-            write_atomic_with_dal(filepath, &refs, &guard, config.dal_level)?;
+            write_atomic_with_dal(filepath, &refs, &guard, &config)?;
             let _ = purge_old_backups(filepath, &config);
 
             Ok((modified.len(), removed, new_lines_len, bk, None))
@@ -434,7 +435,7 @@ fn sniper_manifest(
 
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         if !dry_run.unwrap_or(false) {
-            write_atomic_with_dal(filepath, &refs, &guard, config.dal_level)?;
+            write_atomic_with_dal(filepath, &refs, &guard, &config)?;
             let _ = purge_old_backups(filepath, &config);
         }
 
@@ -645,12 +646,11 @@ fn validate_indentation_py(
     end: usize,
     content: &str,
 ) -> PyResult<Py<PyDict>> {
-    let lines: Vec<String> = fs::read_to_string(filepath)
-        .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
-        .lines()
-        .map(|s| s.to_string())
-        .collect();
-    let content_lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let lines: Vec<String> = split_file_lines(
+        &fs::read_to_string(filepath)
+            .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?,
+    );
+    let content_lines: Vec<String> = split_file_lines(content);
 
     let (valid, msg, detail) = validate_indentation(&lines, start, end, &content_lines);
     let dict = PyDict::new(py);
@@ -680,11 +680,10 @@ fn auto_indent_content_py(
     end: usize,
     content: &str,
 ) -> PyResult<String> {
-    let lines: Vec<String> = fs::read_to_string(filepath)
-        .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
-        .lines()
-        .map(|s| s.to_string())
-        .collect();
+    let lines: Vec<String> = split_file_lines(
+        &fs::read_to_string(filepath)
+            .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?,
+    );
 
     Ok(auto_indent_content(&lines, start, end, content))
 }
@@ -704,11 +703,10 @@ fn auto_indent_content_py(
 ///     IOError: File not found or read error.
 #[pyfunction]
 fn needs_indent_fix_py(filepath: &str, start: usize, end: usize, content: &str) -> PyResult<bool> {
-    let lines: Vec<String> = fs::read_to_string(filepath)
-        .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
-        .lines()
-        .map(|s| s.to_string())
-        .collect();
+    let lines: Vec<String> = split_file_lines(
+        &fs::read_to_string(filepath)
+            .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?,
+    );
 
     Ok(needs_indent_fix(&lines, start, end, content))
 }
@@ -735,11 +733,10 @@ fn verify_context_py(
     end: usize,
     expected_hash: &str,
 ) -> PyResult<Py<PyDict>> {
-    let lines: Vec<String> = fs::read_to_string(filepath)
-        .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?
-        .lines()
-        .map(|s| s.to_string())
-        .collect();
+    let lines: Vec<String> = split_file_lines(
+        &fs::read_to_string(filepath)
+            .map_err(|e| PyIOError::new_err(format!("read {filepath}: {e}")))?,
+    );
 
     let dict = PyDict::new(py);
     match verify_context(&lines, start, end, expected_hash) {
@@ -804,12 +801,13 @@ fn write_atomic_with_dal_py(
         }
     };
 
-    let _config = SniperConfig::from_env();
+    let mut config = SniperConfig::from_env();
+    config.dal_level = level;
     let guard = ResourceGuard::auto(0.5);
 
-    let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let lines: Vec<String> = split_file_lines(content);
     let lines_ref: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
-    let result = write_atomic_with_dal(filepath, &lines_ref, &guard, level);
+    let result = write_atomic_with_dal(filepath, &lines_ref, &guard, &config);
 
     let dict = PyDict::new(py);
     match result {

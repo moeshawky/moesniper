@@ -235,6 +235,22 @@ pub fn hex_decode(hex: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|e| format!("utf8 decode: {e}"))
 }
 
+/// Split file content into lines using `split_inclusive('\n')`, preserving
+/// trailing newlines and empty lines. This MUST be used instead of `.lines()`
+/// for all file content splitting to ensure consistent line handling across
+/// the CLI and Python bindings.
+///
+/// # Arguments
+/// * `content` - Full file content as a UTF-8 `&str`.
+///
+/// # Returns
+/// A `Vec<String>` where each element is a line including its trailing newline
+/// character (the final element includes a trailing newline only if the source
+/// content ends with one).
+pub fn split_file_lines(content: &str) -> Vec<String> {
+    content.split_inclusive('\n').map(String::from).collect()
+}
+
 /// Normalize a file path.
 ///
 /// This function applies path traversal protection while maintaining
@@ -400,15 +416,21 @@ pub fn find_latest_backup(filepath: &str) -> Result<Option<PathBuf>, String> {
 /// already have a guard, use `write_atomic_with_dal`.
 ///
 /// # Arguments
-/// * `filepath` - Target file path.
-/// * `lines` - Content lines to write.
+/// * `filepath` - Target file path (UTF-8 `&str`).
+/// * `lines` - Content lines to write (`&[&str]`; trailing newlines stripped uniformly).
+/// * `config` - Active [`SniperConfig`] providing PID pacing parameters and
+///   audit gating. Must outlive this call.
 ///
 /// # Returns
-/// `Ok(())` on success. `Err(message)` if resource check fails or write fails.
-pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
+/// `Ok(())` on success. `Err(String)` if resource check fails or write fails.
+///
+/// # Errors
+/// Returns `Err` on temp file creation failure, write failure, flush failure,
+/// or rename failure.
+pub fn write_atomic(filepath: &str, lines: &[&str], config: &SniperConfig) -> Result<(), String> {
     let guard = ResourceGuard::auto(0.5);
     let has_trailing_newline = check_trailing_newline(filepath)?;
-    write_atomic_impl(filepath, lines, has_trailing_newline, &guard)
+    write_atomic_impl(filepath, lines, has_trailing_newline, &guard, config)
 }
 
 /// Atomic write gated by a pre-created ResourceGuard with DAL-level enforcement.
@@ -419,31 +441,36 @@ pub fn write_atomic(filepath: &str, lines: &[&str]) -> Result<(), String> {
 /// resources remain safe after the first validation.
 ///
 /// # Arguments
-/// * `filepath` - Target file path.
-/// * `lines` - Content lines to write.
-/// * `guard` - Pre-created ResourceGuard for resource safety checks.
-/// * `dal_level` - Current Defense-Ascension Level from SniperConfig.
+/// * `filepath` - Target file path (UTF-8 `&str`).
+/// * `lines` - Content lines to write (`&[&str]`; trailing newlines stripped uniformly).
+/// * `guard` - Pre-created [`ResourceGuard`] for resource safety checks. Must outlive this call.
+/// * `config` - Active [`SniperConfig`] providing DAL level, PID pacing parameters,
+///   and audit gating. Must outlive this call.
 ///
 /// # Returns
-/// `Ok(())` on success. `Err(message)` if any resource check fails or write fails.
+/// `Ok(())` on success. `Err(String)` if any resource check fails or write fails.
+///
+/// # Errors
+/// Returns `Err` on resource safety check failure, temp file creation failure,
+/// write failure, flush failure, or rename failure.
 pub fn write_atomic_with_dal(
     filepath: &str,
     lines: &[&str],
     guard: &ResourceGuard,
-    dal_level: DalLevel,
+    config: &SniperConfig,
 ) -> Result<(), String> {
     // Gate: initial resource check before any I/O (T4/T9)
     guard.check().map_err(|e| format!("resource safety: {e}"))?;
 
     // DAL Maximum: extra resource check before proceeding
-    if dal_level == DalLevel::Maximum {
+    if config.dal_level == DalLevel::Maximum {
         guard
             .check()
             .map_err(|e| format!("resource safety (DAL maximum): {e}"))?;
     }
 
     let has_trailing_newline = check_trailing_newline(filepath)?;
-    write_atomic_impl(filepath, lines, has_trailing_newline, guard)
+    write_atomic_impl(filepath, lines, has_trailing_newline, guard, config)
 }
 
 fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
@@ -478,21 +505,27 @@ fn check_trailing_newline(filepath: &str) -> Result<bool, String> {
 /// This ensures deterministic behavior regardless of input format.
 ///
 /// # Arguments
-/// * `filepath` - Target file path for atomic write.
-/// * `lines` - Content lines to write (trailing newlines stripped uniformly).
-/// * `has_trailing_newline` - Whether the original file ended with a newline.
-/// * `guard` - Pre-created ResourceGuard for metabolic pacing metrics.
+/// * `filepath` - Target file path for atomic write (UTF-8 `&str`).
+/// * `lines` - Content lines to write (`&[S]` where `S: AsRef<str>`; trailing
+///   newlines stripped uniformly).
+/// * `has_trailing_newline` - Whether the original file ended with a newline
+///   (`bool` from `check_trailing_newline`).
+/// * `guard` - Pre-created [`ResourceGuard`] for metabolic pacing metrics.
+///   Must outlive this call.
+/// * `config` - Active [`SniperConfig`] providing PID pacing parameters and
+///   audit gating. Must outlive this call.
 ///
 /// # Returns
-/// `Ok(())` on successful atomic rename. `Err(message)` on any I/O or resource failure.
+/// `Ok(())` on successful atomic rename. `Err(String)` on any I/O or resource failure.
 ///
 /// # Errors
-/// Returns error if temp file creation, write, flush, resource check, or rename fails.
+/// Returns `Err` if temp file creation, write, flush, resource check, or rename fails.
 fn write_atomic_impl<S: AsRef<str>>(
     filepath: &str,
     lines: &[S],
     has_trailing_newline: bool,
     guard: &ResourceGuard,
+    config: &SniperConfig,
 ) -> Result<(), String> {
     let ts = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -526,10 +559,12 @@ fn write_atomic_impl<S: AsRef<str>>(
     if let Ok(metadata) = fs::metadata(filepath) {
         let perms = metadata.permissions();
         if let Err(e) = fs::set_permissions(&tmp, perms) {
-            eprintln!(
-                "[SNIPER] Warning: failed to preserve file permissions for {:?}: {e}",
-                filepath
-            );
+            if config.audit_enabled {
+                eprintln!(
+                    "[SNIPER] Warning: failed to preserve file permissions for {:?}: {e}",
+                    filepath
+                );
+            }
         }
     }
 
@@ -554,7 +589,6 @@ fn write_atomic_impl<S: AsRef<str>>(
     // and shared here to avoid dual-guard divergence.
     let entropy = guard.raw_entropy();
     let pressure = guard.pressure();
-    let config = SniperConfig::from_env();
     let pid = PidConfig {
         base_ms: config.pid_base_ms,
         entropy_scale: config.pid_entropy_scale,
@@ -1014,7 +1048,7 @@ mod tests {
         assert_eq!(pid.sleep_duration(0, 0), Duration::from_millis(10));
         // base_ms + entropy contribution
         assert_eq!(pid.sleep_duration(1000, 0), Duration::from_millis(510)); // 10 + 500
-        // base_ms + pressure contribution
+                                                                             // base_ms + pressure contribution
         assert_eq!(pid.sleep_duration(0, 100), Duration::from_millis(110)); // 10 + 100
     }
 
@@ -1150,9 +1184,15 @@ mod tests {
     #[test]
     fn test_verify_context_match() {
         let lines: Vec<String> = vec![
-            "a".into(), "b".into(), "c".into(),
-            "X".into(), "Y".into(), "Z".into(),
-            "d".into(), "e".into(), "f".into(),
+            "a".into(),
+            "b".into(),
+            "c".into(),
+            "X".into(),
+            "Y".into(),
+            "Z".into(),
+            "d".into(),
+            "e".into(),
+            "f".into(),
         ];
         // Edit at lines 4-6 (0-indexed: start=3, end=6)
         // compute_context_hash uses start and end as 1-indexed line numbers:
@@ -1170,20 +1210,33 @@ mod tests {
 
         // verify_context should match with the correct hash
         let result = verify_context(&lines, 4, 6, &expected_hash[..16]);
-        assert!(result.is_ok(), "verify_context should return Ok for matching hash, got {:?}", result);
+        assert!(
+            result.is_ok(),
+            "verify_context should return Ok for matching hash, got {:?}",
+            result
+        );
     }
 
     /// Test verify_context with a wrong expected hash (mismatch).
     #[test]
     fn test_verify_context_mismatch() {
         let lines: Vec<String> = vec![
-            "a".into(), "b".into(), "c".into(),
-            "X".into(), "Y".into(), "Z".into(),
-            "d".into(), "e".into(), "f".into(),
+            "a".into(),
+            "b".into(),
+            "c".into(),
+            "X".into(),
+            "Y".into(),
+            "Z".into(),
+            "d".into(),
+            "e".into(),
+            "f".into(),
         ];
         let wrong_hash = "0000000000000000";
         let result = verify_context(&lines, 4, 6, wrong_hash);
-        assert!(result.is_err(), "verify_context should return Err for wrong hash");
+        assert!(
+            result.is_err(),
+            "verify_context should return Err for wrong hash"
+        );
         let err_msg = result.unwrap_err();
         assert!(
             err_msg.contains("context mismatch"),
@@ -1228,8 +1281,14 @@ mod tests {
         std::env::set_current_dir(dir.path()).unwrap();
 
         let result = find_latest_backup("any_file.txt");
-        assert!(result.is_ok(), "find_latest_backup should return Ok when no .sniper/ dir");
-        assert!(result.unwrap().is_none(), "should return None when .sniper/ doesn't exist");
+        assert!(
+            result.is_ok(),
+            "find_latest_backup should return Ok when no .sniper/ dir"
+        );
+        assert!(
+            result.unwrap().is_none(),
+            "should return None when .sniper/ doesn't exist"
+        );
     }
 
     /// find_latest_backup: .sniper/ exists but no matching backup → Ok(None).
@@ -1247,8 +1306,14 @@ mod tests {
         fs::write(&test_file, "hello").unwrap();
 
         let result = find_latest_backup(test_file.to_str().unwrap());
-        assert!(result.is_ok(), "find_latest_backup should return Ok when .sniper/ is empty");
-        assert!(result.unwrap().is_none(), "should return None when no matching backups exist");
+        assert!(
+            result.is_ok(),
+            "find_latest_backup should return Ok when .sniper/ is empty"
+        );
+        assert!(
+            result.unwrap().is_none(),
+            "should return None when no matching backups exist"
+        );
     }
 
     /// find_latest_backup: .sniper/ has a matching backup → Ok(Some(path)).
@@ -1271,10 +1336,17 @@ mod tests {
         let result = find_latest_backup(test_file.to_str().unwrap());
         assert!(result.is_ok(), "find_latest_backup should return Ok");
         let found = result.unwrap();
-        assert!(found.is_some(), "should return Some(path) when backup exists");
+        assert!(
+            found.is_some(),
+            "should return Some(path) when backup exists"
+        );
         let found_path = found.unwrap();
         // Path is relative to CWD (the temp dir), verify it exists now
-        assert!(found_path.exists(), "returned backup path should exist: {:?}", found_path);
+        assert!(
+            found_path.exists(),
+            "returned backup path should exist: {:?}",
+            found_path
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1291,8 +1363,15 @@ mod tests {
         std::env::set_current_dir(dir.path()).unwrap();
 
         let result = count_recent_backups("any_file.txt", 3600);
-        assert!(result.is_ok(), "count_recent_backups should return Ok when no .sniper/ dir");
-        assert_eq!(result.unwrap(), 0, "should return 0 when .sniper/ doesn't exist");
+        assert!(
+            result.is_ok(),
+            "count_recent_backups should return Ok when no .sniper/ dir"
+        );
+        assert_eq!(
+            result.unwrap(),
+            0,
+            "should return 0 when .sniper/ doesn't exist"
+        );
     }
 
     /// count_recent_backups: with a recent backup and varied window sizes.
@@ -1325,7 +1404,8 @@ mod tests {
         let count_zero = count_recent_backups(test_file.to_str().unwrap(), 0);
         assert!(count_zero.is_ok(), "count_recent_backups should succeed");
         assert_eq!(
-            count_zero.unwrap(), 0,
+            count_zero.unwrap(),
+            0,
             "should return 0 with 0-second window (no backups strictly after now)"
         );
     }
@@ -1346,13 +1426,26 @@ mod tests {
         let nonexistent = dir.path().join("does_not_exist.txt");
 
         let result = create_backup(nonexistent.to_str().unwrap());
-        assert!(result.is_ok(), "create_backup should return Ok for nonexistent source, got {:?}", result);
+        assert!(
+            result.is_ok(),
+            "create_backup should return Ok for nonexistent source, got {:?}",
+            result
+        );
         let backup_path_str = result.unwrap();
         let backup_path = std::path::Path::new(&backup_path_str);
-        assert!(backup_path.exists(), "backup file should exist at {}", backup_path_str);
+        assert!(
+            backup_path.exists(),
+            "backup file should exist at {}",
+            backup_path_str
+        );
         // The backup should be empty (length 0)
         let metadata = fs::metadata(backup_path).expect("should be able to read backup metadata");
-        assert_eq!(metadata.len(), 0, "backup file should be empty (length 0), got {}", metadata.len());
+        assert_eq!(
+            metadata.len(),
+            0,
+            "backup file should be empty (length 0), got {}",
+            metadata.len()
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -1438,8 +1531,8 @@ mod tests {
         fs::create_dir_all(BACKUP_DIR).unwrap();
 
         // Create dummy backup files whose names match the file hash prefix
-        let normalized = normalize_path(file.to_str().unwrap())
-            .expect("normalize_path should succeed");
+        let normalized =
+            normalize_path(file.to_str().unwrap()).expect("normalize_path should succeed");
         let hash = get_path_hash(&normalized);
         for i in 1..=3 {
             let backup_name = format!("{}.test_age_purge.txt.{}", hash, i * 1000);
@@ -1496,12 +1589,11 @@ mod tests {
         fs::write(&file, "original\n").unwrap();
 
         let guard = ResourceGuard::for_testing(usize::MAX / 2, 0, 0);
-        let result = write_atomic_with_dal(
-            file.to_str().unwrap(),
-            &["replaced"],
-            &guard,
-            DalLevel::Maximum,
-        );
+        let config = SniperConfig {
+            dal_level: DalLevel::Maximum,
+            ..SniperConfig::default()
+        };
+        let result = write_atomic_with_dal(file.to_str().unwrap(), &["replaced"], &guard, &config);
 
         let content = fs::read_to_string(&file).unwrap();
         assert!(
@@ -1535,12 +1627,11 @@ mod tests {
         fs::write(&file, "original\n").unwrap();
 
         let guard = ResourceGuard::for_testing(usize::MAX / 2, 0, 0);
-        let result = write_atomic_with_dal(
-            file.to_str().unwrap(),
-            &["baseline"],
-            &guard,
-            DalLevel::Baseline,
-        );
+        let config = SniperConfig {
+            dal_level: DalLevel::Baseline,
+            ..SniperConfig::default()
+        };
+        let result = write_atomic_with_dal(file.to_str().unwrap(), &["baseline"], &guard, &config);
 
         let content = fs::read_to_string(&file).unwrap();
         assert!(
@@ -1576,8 +1667,8 @@ mod tests {
 
         // Manually create .sniper/ and lock file with a stale PID
         fs::create_dir_all(BACKUP_DIR).unwrap();
-        let normalized = normalize_path(file.to_str().unwrap())
-            .expect("normalize_path should succeed");
+        let normalized =
+            normalize_path(file.to_str().unwrap()).expect("normalize_path should succeed");
         let hash = get_path_hash(&normalized);
         let lock_path = PathBuf::from(BACKUP_DIR).join(format!("sniper.{}.lock", hash));
 

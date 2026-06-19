@@ -262,9 +262,8 @@ fn detect_expected_indent(all_lines: &[String], start_line: usize) -> (IndentSty
         // is not at end-of-line but still opens a block for lines below.
         // `fn foo() {}` (last brace is `}`) is correctly NOT treated as opener.
         let last_brace_pos = trimmed_no_comment.rfind(['{', '}']);
-        let opens_block = last_brace_pos.is_some_and(|pos| {
-            trimmed_no_comment.as_bytes()[pos] == b'{'
-        });
+        let opens_block =
+            last_brace_pos.is_some_and(|pos| trimmed_no_comment.as_bytes()[pos] == b'{');
         if opens_block
             || trimmed_no_comment.ends_with(':')
             || trimmed_no_comment.ends_with('(')
@@ -512,12 +511,7 @@ pub fn auto_indent_content(
                 // BUG FIX: base indent uses style char, overhang is always spaces
                 let base = indent_char.to_string().repeat(effective_indent.len());
                 let overhang_spaces = " ".repeat(overhang);
-                format!(
-                    "{}{}{}",
-                    base,
-                    overhang_spaces,
-                    line.trim_start()
-                )
+                format!("{}{}{}", base, overhang_spaces, line.trim_start())
             }
         })
         .collect::<Vec<_>>()
@@ -683,22 +677,25 @@ mod tests {
             "    let y = 2;\n".to_string(),
         ];
         let (_, level) = detect_expected_indent(&all_lines, 2);
-        assert_eq!(level, 1, "`{{` not at EOL still opens a block for next line");
+        assert_eq!(
+            level, 1,
+            "`{{` not at EOL still opens a block for next line"
+        );
     }
 
     /// G1 edge: self-contained `fn foo() {}` — brace opens AND closes on same line,
     /// so the next line should NOT be indented (block is already closed).
     #[test]
     fn test_expected_indent_self_contained_block_no_indent() {
-        let all_lines = vec![
-            "fn foo() {}\n".to_string(),
-            "fn bar() {\n".to_string(),
-        ];
+        let all_lines = vec!["fn foo() {}\n".to_string(), "fn bar() {\n".to_string()];
         let (_, level) = detect_expected_indent(&all_lines, 2);
         // `fn foo() {}` has last brace as `}` → no increment.
         // `fn bar() {` on line 2 is at file top (only 1 prior non-empty)
         // → context_level derived from line 1's indent (level 0).
-        assert_eq!(level, 0, "Self-contained block on prior line must not increment level");
+        assert_eq!(
+            level, 0,
+            "Self-contained block on prior line must not increment level"
+        );
     }
 
     #[test]
@@ -1149,8 +1146,10 @@ mod tests {
         let content = "}";
         let fixed = auto_indent_content(&lines, 3, 3, content);
         // EXPECTED: closing brace should be at block level 0
-        assert_eq!(fixed, "}",
-            "BUG: auto_indent_content indents closing brace to body level");
+        assert_eq!(
+            fixed, "}",
+            "BUG: auto_indent_content indents closing brace to body level"
+        );
     }
 
     #[test]
@@ -1167,8 +1166,10 @@ mod tests {
         let content = "}\nfn next() {";
         let fixed = auto_indent_content(&lines, 5, 5, content);
         // EXPECTED: `}` at level 0, `fn next()` at level 0
-        assert_eq!(fixed, "}\nfn next() {",
-            "BUG: closing brace and next function should be at level 0");
+        assert_eq!(
+            fixed, "}\nfn next() {",
+            "BUG: closing brace and next function should be at level 0"
+        );
     }
 
     // --- BUG 2: auto_indent_content tabs overhang bug ---
@@ -1178,9 +1179,7 @@ mod tests {
         // When a tab-indented file receives space-indented content with
         // multi-level internal indentation, the overhang (extra spaces beyond
         // the minimum) is incorrectly converted to tabs instead of spaces.
-        let mut lines: Vec<String> = (0..30)
-            .map(|_| "\tfn foo() {}".to_string())
-            .collect();
+        let mut lines: Vec<String> = (0..30).map(|_| "\tfn foo() {}".to_string()).collect();
         lines.push("\t\tpass".to_string()); // line 31, inside a `{` block → expected level 2
 
         // Content has base indent 0 but internal line at 4 spaces
@@ -1192,8 +1191,10 @@ mod tests {
         let content = "outer\n    inner";
         let fixed = auto_indent_content(&lines, 31, 31, content);
         // EXPECTED: 2 tabs for base + 4 spaces for overhang
-        assert_eq!(fixed, "\t\touter\n\t\t    inner",
-            "BUG: overhang spaces incorrectly converted to tabs");
+        assert_eq!(
+            fixed, "\t\touter\n\t\t    inner",
+            "BUG: overhang spaces incorrectly converted to tabs"
+        );
     }
 
     // --- BUG 3: auto_indent_content with only whitespace lines ---
@@ -1229,7 +1230,7 @@ mod tests {
         // All lines are blank/empty — should fall back to default (4 spaces).
         let lines: Vec<String> = vec![
             "\n".to_string(),
-            "   \n".to_string(),  // whitespace-only
+            "   \n".to_string(), // whitespace-only
             "\n".to_string(),
             "     \n".to_string(), // whitespace-only
         ];
@@ -1341,7 +1342,11 @@ mod tests {
         let (valid, warning, _fix) = validate_indentation(&lines, 4, 5, &replacement);
         // `}` at level 1 closes `if`, `}` at level 0 closes `outer`.
         // Closer tokens should be skipped for min_leading computation.
-        assert!(valid, "Only-closer-token content should be valid, got warning: {:?}", warning);
+        assert!(
+            valid,
+            "Only-closer-token content should be valid, got warning: {:?}",
+            warning
+        );
     }
 
     // --- BUG 12: detect_indent_style with mixed tabs+spaces per line (discarded) ---
@@ -1360,7 +1365,10 @@ mod tests {
         // Wait, 1.0 > 0.80 would flip to tabs! No — tab_levels.len() is 0 because mixed lines
         // have BOTH tabs and spaces, so they don't count for either.
         let style = detect_indent_style(&lines);
-        assert!(!style.uses_tabs, "Mixed lines should be discarded, keeping space style");
+        assert!(
+            !style.uses_tabs,
+            "Mixed lines should be discarded, keeping space style"
+        );
         assert_eq!(style.spaces, 4);
     }
 
@@ -1433,11 +1441,16 @@ mod tests {
         // Content has body code at level 1 and a closing `}` meant for level 0.
         // The `}` should NOT drag down min_leading, so body code stays at level 1
         // and the `}` stays at its intended level 0 (dedented relative to body).
-        let lines = vec!["fn outer() {\n".to_string(), "    // insert here\n".to_string()];
+        let lines = vec![
+            "fn outer() {\n".to_string(),
+            "    // insert here\n".to_string(),
+        ];
         let content = "    do_thing()\n}";
         let fixed = auto_indent_content(&lines, 2, 2, content);
         // `do_thing()` at level 1 (4 spaces), `}` at level 0 (closes outer).
-        assert_eq!(fixed, "    do_thing()\n}",
-            "G2: closer in content must not pull down body indentation");
+        assert_eq!(
+            fixed, "    do_thing()\n}",
+            "G2: closer in content must not pull down body indentation"
+        );
     }
 }
