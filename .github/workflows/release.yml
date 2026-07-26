@@ -1,8 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # GitHub Release (library projects — no binaries to attach)
 # ═══════════════════════════════════════════════════════════════════════════════
-# Canonical source: /workspace/.github/workflows/release-github.yml
-# Reference:        /workspace/PUBLISHING.md
+# Release reference: PUBLISHING.md
 #
 # For library projects (sniper, llmosafe) that publish to crates.io + PyPI
 # but don't distribute binaries. Creates a GitHub Release with auto-generated
@@ -22,7 +21,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Create GitHub Release
         env:

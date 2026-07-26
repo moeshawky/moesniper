@@ -57,7 +57,7 @@ pub const BACKUP_DIR: &str = ".sniper";
 pub struct ManifestOp {
     /// 1-based start line (inclusive).
     pub start: usize,
-    /// 1-based end line (exclusive). Defaults to start if absent.
+    /// 1-based end line (inclusive). Defaults to start if absent.
     #[serde(default)]
     pub end: Option<usize>,
     /// Hex-encoded content to insert at this position.
@@ -66,6 +66,43 @@ pub struct ManifestOp {
     /// If true, delete the range instead of inserting content.
     #[serde(default)]
     pub delete: Option<bool>,
+}
+
+/// Check if two manifest operations have overlapping ranges.
+///
+/// Considers insertion semantics:
+/// - Non-insert ops overlap when their inclusive intervals intersect.
+/// - Insert ops (`start > end`, i.e., zero-width point before `start`)
+///   overlap at the same insertion point.
+/// - An insert overlaps a non-insert when the insert point lies inside
+///   the non-insert's inclusive range.
+/// - Adjacent ranges (`insert.start == range.end + 1` or
+///   `a.end + 1 == b.start`) do NOT overlap.
+///
+/// # Arguments
+/// * `a` - First manifest operation.
+/// * `b` - Second manifest operation.
+///
+/// # Returns
+/// `true` if the operations' ranges overlap and would produce
+/// ambiguous results if applied to the same file.
+pub fn manifest_ops_overlap(a: &ManifestOp, b: &ManifestOp) -> bool {
+    let a_end = a.end.unwrap_or(a.start);
+    let b_end = b.end.unwrap_or(b.start);
+
+    let a_is_insert = a.start > a_end;
+    let b_is_insert = b.start > b_end;
+
+    match (a_is_insert, b_is_insert) {
+        // Both are inserts: same insertion point = overlap
+        (true, true) => a.start == b.start,
+        // a is insert, b is non-insert
+        (true, false) => b.start <= a.start && a.start <= b_end,
+        // a is non-insert, b is insert
+        (false, true) => a.start <= b.start && b.start <= a_end,
+        // Neither is insert: standard interval overlap
+        (false, false) => a.start <= b_end && b.start <= a_end,
+    }
 }
 
 /// Snapshot of memory statistics from a ResourceGuard at a point in time.
@@ -342,10 +379,27 @@ pub fn create_backup(filepath: &str) -> Result<String, String> {
 }
 
 /// Purge old backups according to retention policy.
-pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), String> {
+///
+/// Counts the number of backups successfully removed.
+/// Returns `Ok(count)` on success, `Err(e)` if the backup directory
+/// cannot be read or the path cannot be resolved.
+///
+/// # Arguments
+/// * `filepath` - Path to the target file whose backups to purge.
+/// * `config` - Configuration controlling retention count and max age.
+///
+/// # Returns
+/// Number of backup files successfully removed.
+///
+/// # Invariants
+/// - Zero retention count and zero max age means no policy — returns `Ok(0)`.
+/// - Missing backup directory returns `Ok(0)`.
+/// - Per-file deletion failures are logged to stderr but do not abort
+///   the purge of remaining candidates.
+fn purge_old_backups_inner(filepath: &str, config: &SniperConfig) -> Result<usize, String> {
     if config.backup_retention_count == 0 && config.backup_max_age_days == 0 {
         // No retention policy configured
-        return Ok(());
+        return Ok(0);
     }
 
     let normalized = normalize_path(filepath)?;
@@ -353,7 +407,7 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
     let dir = backup_dir_for(filepath)?;
 
     if !dir.exists() {
-        return Ok(());
+        return Ok(0);
     }
 
     // Collect all backups for this file
@@ -374,13 +428,13 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
     let now = SystemTime::now();
     let max_age = if config.backup_max_age_days > 0 {
         Some(Duration::from_secs(
-            config.backup_max_age_days * 24 * 60 * 60,
+            config.backup_max_age_days.saturating_mul(24 * 60 * 60),
         ))
     } else {
         None
     };
 
-    let mut to_delete = HashSet::new();
+    let mut to_delete: HashSet<&Path> = HashSet::new();
 
     // Age-based purge
     if let Some(max_age_duration) = max_age {
@@ -400,14 +454,49 @@ pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), St
     }
 
     // Delete marked backups — always log activity (audit_enabled is additive, not gating)
+    let mut removed_count = 0usize;
     for path in &to_delete {
         match fs::remove_file(path) {
-            Ok(()) => eprintln!("[SNIPER] Purged old backup: {:?}", path),
+            Ok(()) => {
+                eprintln!("[SNIPER] Purged old backup: {:?}", path);
+                removed_count += 1;
+            }
             Err(e) => eprintln!("[SNIPER] Failed to purge backup {:?}: {e}", path),
         }
     }
 
-    Ok(())
+    Ok(removed_count)
+}
+
+/// Purge old backups according to retention policy.
+///
+/// Wrapper that discards the count for backward compatibility.
+/// See `purge_old_backups_count` if the caller needs the number
+/// of removed backups.
+///
+/// # Arguments
+/// * `filepath` - Path to the target file whose backups to purge.
+/// * `config` - Configuration controlling retention count and max age.
+///
+/// # Returns
+/// `Ok(())` on success, `Err(e)` if an error occurs.
+pub fn purge_old_backups(filepath: &str, config: &SniperConfig) -> Result<(), String> {
+    purge_old_backups_inner(filepath, config).map(|_| ())
+}
+
+/// Purge old backups according to retention policy, returning count.
+///
+/// Same as `purge_old_backups` but returns the number of backup files
+/// successfully removed instead of discarding it.
+///
+/// # Arguments
+/// * `filepath` - Path to the target file whose backups to purge.
+/// * `config` - Configuration controlling retention count and max age.
+///
+/// # Returns
+/// Number of backup files successfully removed.
+pub fn purge_old_backups_count(filepath: &str, config: &SniperConfig) -> Result<usize, String> {
+    purge_old_backups_inner(filepath, config)
 }
 
 /// Finds the most recent backup for a given file.
@@ -1792,5 +1881,272 @@ mod tests {
                     .unwrap_or(true),
             "CWD .sniper/ should NOT contain the lock (or should be empty if it existed before)"
         );
+    }
+
+    // =========================================================================
+    // manifest_ops_overlap — overlap detection semantics
+    // =========================================================================
+
+    /// Non-insert ops with partial overlap: [5,10] and [8,15]
+    #[test]
+    fn test_manifest_ops_overlap_different_starts() {
+        let a = ManifestOp {
+            start: 5,
+            end: Some(10),
+            hex: None,
+            delete: None,
+        };
+        let b = ManifestOp {
+            start: 8,
+            end: Some(15),
+            hex: None,
+            delete: None,
+        };
+        // a and b overlap because [5,10] ⋂ [8,15] = [8,10]
+        assert!(manifest_ops_overlap(&a, &b));
+        assert!(manifest_ops_overlap(&b, &a));
+    }
+
+    /// Non-insert containment overlap: [5,25] contains [10,15]
+    #[test]
+    fn test_manifest_ops_overlap_containment() {
+        let a = ManifestOp {
+            start: 5,
+            end: Some(25),
+            hex: None,
+            delete: None,
+        };
+        let b = ManifestOp {
+            start: 10,
+            end: Some(15),
+            hex: None,
+            delete: None,
+        };
+        assert!(manifest_ops_overlap(&a, &b));
+        assert!(manifest_ops_overlap(&b, &a));
+    }
+
+    /// Identical non-insert ranges:
+    #[test]
+    fn test_manifest_ops_overlap_identical() {
+        let a = ManifestOp {
+            start: 5,
+            end: Some(10),
+            hex: None,
+            delete: None,
+        };
+        let b = ManifestOp {
+            start: 5,
+            end: Some(10),
+            hex: None,
+            delete: None,
+        };
+        assert!(manifest_ops_overlap(&a, &b));
+    }
+
+    /// Adjacent non-insert ranges: [5,10] and [11,15] — must NOT overlap
+    #[test]
+    fn test_manifest_ops_adjacent_non_overlap() {
+        let a = ManifestOp {
+            start: 5,
+            end: Some(10),
+            hex: None,
+            delete: None,
+        };
+        let b = ManifestOp {
+            start: 11,
+            end: Some(15),
+            hex: None,
+            delete: None,
+        };
+        assert!(!manifest_ops_overlap(&a, &b));
+        assert!(!manifest_ops_overlap(&b, &a));
+    }
+
+    /// Far-apart non-insert ranges: [5,10] and [20,25]
+    #[test]
+    fn test_manifest_ops_far_apart_non_overlap() {
+        let a = ManifestOp {
+            start: 5,
+            end: Some(10),
+            hex: None,
+            delete: None,
+        };
+        let b = ManifestOp {
+            start: 20,
+            end: Some(25),
+            hex: None,
+            delete: None,
+        };
+        assert!(!manifest_ops_overlap(&a, &b));
+        assert!(!manifest_ops_overlap(&b, &a));
+    }
+
+    /// Inserts at same point overlap
+    #[test]
+    fn test_manifest_ops_insert_same_point_overlap() {
+        let a = ManifestOp {
+            start: 15,
+            end: Some(14), // start == end + 1 → insert before line 15
+            hex: None,
+            delete: None,
+        };
+        let b = ManifestOp {
+            start: 15,
+            end: Some(14),
+            hex: None,
+            delete: None,
+        };
+        assert!(manifest_ops_overlap(&a, &b));
+    }
+
+    /// Inserts at different points do NOT overlap
+    #[test]
+    fn test_manifest_ops_insert_different_points_non_overlap() {
+        let a = ManifestOp {
+            start: 15,
+            end: Some(14),
+            hex: None,
+            delete: None,
+        };
+        let b = ManifestOp {
+            start: 20,
+            end: Some(19),
+            hex: None,
+            delete: None,
+        };
+        assert!(!manifest_ops_overlap(&a, &b));
+    }
+
+    /// Insert inside a non-insert range overlaps
+    #[test]
+    fn test_manifest_ops_insert_inside_range_overlap() {
+        let range = ManifestOp {
+            start: 5,
+            end: Some(20),
+            hex: None,
+            delete: None,
+        };
+        let ins = ManifestOp {
+            start: 12,
+            end: Some(11), // insert before line 12 (inside [5,20])
+            hex: None,
+            delete: None,
+        };
+        assert!(manifest_ops_overlap(&range, &ins));
+        assert!(manifest_ops_overlap(&ins, &range));
+    }
+
+    /// Insert exactly after a non-insert range — adjacent, NOT overlap
+    #[test]
+    fn test_manifest_ops_insert_after_range_non_overlap() {
+        let range = ManifestOp {
+            start: 5,
+            end: Some(10),
+            hex: None,
+            delete: None,
+        };
+        let ins = ManifestOp {
+            start: 11,
+            end: Some(10), // insert before line 11 (right after range ends at 10)
+            hex: None,
+            delete: None,
+        };
+        assert!(!manifest_ops_overlap(&range, &ins));
+        assert!(!manifest_ops_overlap(&ins, &range));
+    }
+
+    /// Insert BEFORE a non-insert range (before line 5) — no overlap
+    #[test]
+    fn test_manifest_ops_insert_before_range_non_overlap() {
+        let range = ManifestOp {
+            start: 5,
+            end: Some(10),
+            hex: None,
+            delete: None,
+        };
+        let ins = ManifestOp {
+            start: 3,
+            end: Some(2),
+            hex: None,
+            delete: None,
+        };
+        assert!(!manifest_ops_overlap(&range, &ins));
+        assert!(!manifest_ops_overlap(&ins, &range));
+    }
+
+    // =========================================================================
+    // purge_old_backups_count — count semantics
+    // =========================================================================
+
+    /// purge_old_backups_count returns the correct count of removed backups
+    #[test]
+    fn test_purge_old_backups_count_by_retention() {
+        let _serial = CWD_MUTEX.lock().unwrap();
+        let dir = TempDir::new().unwrap();
+        let original_cwd = std::env::current_dir().unwrap();
+        let _cwd_guard = CwdGuard::new(original_cwd);
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let file = PathBuf::from("test_purge_count.txt");
+        fs::write(&file, "v0").unwrap();
+
+        let config = SniperConfig {
+            backup_retention_count: 3,
+            backup_max_age_days: 0,
+            ..SniperConfig::default()
+        };
+
+        // Create 5 backups
+        for i in 1..=5 {
+            fs::write(&file, format!("v{i}")).unwrap();
+            create_backup(file.to_str().unwrap()).expect("Backup creation must succeed");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        // Purge with retention=3: should remove 2 (5 - 3)
+        let count =
+            purge_old_backups_count(file.to_str().unwrap(), &config).expect("Purge must succeed");
+        assert_eq!(
+            count, 2,
+            "purge_old_backups_count should return 2 (5 backups - 3 retention), got {}",
+            count
+        );
+
+        let _ = fs::remove_file(&file);
+    }
+
+    /// purge_old_backups_count returns 0 when no policy configured
+    #[test]
+    fn test_purge_old_backups_count_no_policy() {
+        let config = SniperConfig {
+            backup_retention_count: 0,
+            backup_max_age_days: 0,
+            ..SniperConfig::default()
+        };
+        let result = purge_old_backups_count("/tmp/nonexistent_sniper_test_xyz.txt", &config);
+        assert_eq!(
+            result.unwrap(),
+            0,
+            "purge_old_backups_count should return 0 when no policy configured"
+        );
+    }
+
+    /// purge_old_backups (wrapper) still returns Ok(())
+    #[test]
+    fn test_purge_old_backups_wrapper_returns_unit() {
+        let config = SniperConfig {
+            backup_retention_count: 0,
+            backup_max_age_days: 0,
+            ..SniperConfig::default()
+        };
+        let result = purge_old_backups("/tmp/nonexistent_sniper_test_xyz.txt", &config);
+        assert!(
+            result.is_ok(),
+            "purge_old_backups wrapper should return Ok(()), got {:?}",
+            result
+        );
+        // Verify it's Ok(()) not Ok(some_number)
+        assert_eq!(result.unwrap(), (), "purge_old_backups must return Ok(())");
     }
 }

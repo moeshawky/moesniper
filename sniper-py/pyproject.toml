@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "moesniper"
-version = "0.7.12"
+version = "0.7.13"
 description = "Escape-proof precision file editing — Python bindings for moesniper"
 readme = "README.md"
 license = {text = "MIT"}
@@ -25,13 +25,14 @@ keywords = ["editor", "llm", "agent", "hex", "precision"]
 
 [project.urls]
 Homepage = "https://github.com/moeshawky/moesniper"
-Changelog = "https://github.com/moeshawky/moesniper/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/moeshawky/moesniper/blob/master/CHANGELOG.md"
 Issues = "https://github.com/moeshawky/moesniper/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "moesniper._native"
+exclude = ["python/**/__pycache__/**", "python/**/*.pyc"]
 
 # ── Ruff (linter) ──────────────────────────────────────────
 [tool.ruff]

@@ -8,10 +8,10 @@ use llmosafe::ResourceGuard;
 
 use moesniper::{
     auto_indent_content, check_file_size, count_recent_backups, create_backup, find_latest_backup,
-    generate_preview, handle_backtrack_error, hex_decode, hex_encode, needs_indent_fix,
-    normalize_path, purge_old_backups, recommend_from_risk, split_file_lines, validate_indentation,
-    verify_context, write_atomic_with_dal, ManifestOp, RiskTelemetry, SniperConfig, SniperLock,
-    NAME, VERSION,
+    generate_preview, handle_backtrack_error, hex_decode, hex_encode, manifest_ops_overlap,
+    needs_indent_fix, normalize_path, purge_old_backups, purge_old_backups_count,
+    recommend_from_risk, split_file_lines, validate_indentation, verify_context,
+    write_atomic_with_dal, ManifestOp, RiskTelemetry, SniperConfig, SniperLock, NAME, VERSION,
 };
 
 /// Python bindings for moesniper — escape-proof precision file editing.
@@ -348,14 +348,16 @@ fn sniper_manifest(
 
         ops.sort_by_key(|b| std::cmp::Reverse(b.start));
 
-        // Guard: overlapping same-start operations cause silent data loss.
+        // Guard: overlapping manifest operations cause silent data loss.
         // Bottom-up processing assumes each op targets a distinct line range;
-        // two ops at the same start line would corrupt each other's output.
+        // two ops with overlapping intervals would corrupt each other's output
+        // through the shared lines Vec.
         for i in 1..ops.len() {
-            if ops[i].start == ops[i - 1].start {
+            if manifest_ops_overlap(&ops[i], &ops[i - 1]) {
                 return Err(format!(
-                    "overlapping manifest operations at line {}",
-                    ops[i].start
+                    "overlapping manifest operations at lines {} and {}",
+                    ops[i].start,
+                    ops[i - 1].start
                 ));
             }
         }
@@ -842,19 +844,13 @@ fn write_atomic_with_dal_py(
 ///     bool: True if file size is within limit.
 ///
 /// Raises:
-///     ValueError: File exceeds the maximum size limit.
-///     IOError: File not found, stat error, or other I/O error.
+///     OSError: File exceeds the maximum size limit, file not found,
+///              stat error, or other I/O error.
 #[pyfunction]
 fn check_file_size_py(filepath: &str, max_size: u64) -> PyResult<bool> {
     check_file_size(filepath, max_size)
         .map(|_| true)
-        .map_err(|msg| {
-            if msg.contains("File too large") {
-                PyValueError::new_err(msg)
-            } else {
-                PyIOError::new_err(msg)
-            }
-        })
+        .map_err(PyIOError::new_err)
 }
 
 /// Normalize a file path (expand ~, resolve symlinks).
@@ -930,7 +926,7 @@ fn count_recent_backups_py(filepath: &str, window_secs: u64) -> PyResult<usize> 
 ///     max_age_days (int): Maximum age in days.
 ///
 /// Returns:
-///     int: Always returns 0 (TODO: count not yet exposed by underlying library).
+///     int: Number of backup files successfully removed.
 ///
 /// Raises:
 ///     IOError: Purge failed.
@@ -946,10 +942,7 @@ fn purge_old_backups_py(
         backup_max_age_days: max_age_days,
         ..SniperConfig::from_env()
     };
-    // purge_old_backups returns Result<(), String> — count not exposed
-    purge_old_backups(filepath, &config)
-        .map(|_| 0)
-        .map_err(PyIOError::new_err)
+    purge_old_backups_count(filepath, &config).map_err(PyIOError::new_err)
 }
 
 /// Generate a diff preview for dry-run without modifying files.

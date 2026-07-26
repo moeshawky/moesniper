@@ -36,8 +36,9 @@ use std::io::Read;
 use moesniper::{
     auto_indent_content, check_file_size, compute_context_hash, count_recent_backups,
     create_backup, find_latest_backup, generate_preview, handle_backtrack_error, hex_decode,
-    needs_indent_fix, normalize_path, purge_old_backups, recommend_from_risk, validate_indentation,
-    verify_context, write_atomic_with_dal, ManifestOp, RiskTelemetry, SniperConfig, SniperLock,
+    manifest_ops_overlap, needs_indent_fix, normalize_path, purge_old_backups, recommend_from_risk,
+    validate_indentation, verify_context, write_atomic_with_dal, ManifestOp, RiskTelemetry,
+    SniperConfig, SniperLock,
 };
 
 use llmosafe::ResourceGuard;
@@ -344,9 +345,10 @@ fn cmd_context(filepath: &str, start: usize, end: usize) -> CliResult {
         Ok(p) => p,
         Err(e) => return err(e),
     };
-    let resolved_str = resolved_path
-        .to_str()
-        .expect("resolved path must be valid UTF-8");
+    let resolved_str = match resolved_path.to_str() {
+        Some(path) => path,
+        None => return err("resolved path is not valid UTF-8".into()),
+    };
     if let Err(e) = check_file_size(resolved_str, config.max_file_size) {
         return err(e);
     }
@@ -406,9 +408,10 @@ fn cmd_splice(
         Ok(p) => p,
         Err(e) => return err(e),
     };
-    let resolved_str = resolved_path
-        .to_str()
-        .expect("resolved path must be valid UTF-8");
+    let resolved_str = match resolved_path.to_str() {
+        Some(path) => path,
+        None => return err("resolved path is not valid UTF-8".into()),
+    };
 
     if let Err(e) = check_file_size(resolved_str, config.max_file_size) {
         return err(e);
@@ -656,9 +659,10 @@ fn cmd_manifest_impl(
         Ok(p) => p,
         Err(e) => return err(e),
     };
-    let resolved_str = resolved_path
-        .to_str()
-        .expect("resolved path must be valid UTF-8");
+    let resolved_str = match resolved_path.to_str() {
+        Some(path) => path,
+        None => return err("resolved path is not valid UTF-8".into()),
+    };
 
     if let Err(e) = check_file_size(resolved_str, config.max_file_size) {
         return err(e);
@@ -701,14 +705,17 @@ fn cmd_manifest_impl(
     // Sort bottom-up
     ops.sort_by_key(|b| std::cmp::Reverse(b.start));
 
-    // Guard: overlapping same-start operations cause silent data loss.
+    // Guard: overlapping manifest operations cause silent data loss.
     // Bottom-up processing assumes each op targets a distinct line range;
-    // two ops at the same start line would corrupt each other's output.
+    // two ops with overlapping intervals would corrupt each other's output
+    // through the shared lines Vec. Checks both same-start and interval
+    // overlap (different starts, intersecting ranges).
     for i in 1..ops.len() {
-        if ops[i].start == ops[i - 1].start {
+        if manifest_ops_overlap(&ops[i], &ops[i - 1]) {
             return err(format!(
-                "overlapping manifest operations at line {}",
-                ops[i].start
+                "overlapping manifest operations at lines {} and {}",
+                ops[i].start,
+                ops[i - 1].start
             ));
         }
     }
@@ -982,6 +989,39 @@ mod tests {
 
     fn read_file(path: impl AsRef<std::path::Path>) -> String {
         fs::read_to_string(path).unwrap()
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_non_utf8_canonical_target_returns_errors_instead_of_panicking() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        use std::os::unix::fs::symlink;
+
+        let dir = TempDir::new().unwrap();
+        let target = dir
+            .path()
+            .join(OsString::from_vec(b"non-utf8-\xff.txt".to_vec()));
+        fs::write(&target, "original\n").unwrap();
+
+        let link = dir.path().join("utf8-link.txt");
+        symlink(&target, &link).unwrap();
+        let link_str = link.to_str().unwrap();
+
+        let results = [
+            cmd_context(link_str, 1, 1),
+            cmd_splice(link_str, 1, 1, "replacement", true, false, false, None),
+            cmd_manifest_impl(link_str, "[]", true, false, false, None),
+        ];
+
+        for result in results {
+            assert_eq!(result.status, "error");
+            assert_eq!(
+                result.message.as_deref(),
+                Some("resolved path is not valid UTF-8")
+            );
+        }
+        assert_eq!(fs::read_to_string(target).unwrap(), "original\n");
     }
 
     // --- hex_decode tests ---
@@ -1916,14 +1956,12 @@ mod tests {
         );
     }
 
-    /// Verify that writing to a NEW file (that doesn't exist yet) works.
-    /// This tests the create_backup path where the source file doesn't exist.
+    /// Verify that the CLI rejects a target that does not exist yet.
     #[test]
-    fn test_cmd_splice_creates_new_file() {
+    fn test_cmd_splice_rejects_new_file() {
         let dir = TempDir::new().unwrap();
         let nonexistent = dir.path().join("brand_new.txt");
 
-        // cmd_splice should fail because file doesn't exist (can't read it)
         let r = cmd_splice(
             nonexistent.to_str().unwrap(),
             1,
@@ -1934,7 +1972,6 @@ mod tests {
             false,
             None,
         );
-        // Currently sniper requires existing files; creation is not supported by cmd_splice
         assert_eq!(
             r.status, "error",
             "Editing nonexistent file must return error, not crash"

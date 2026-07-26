@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.13] - 2026-07-27
+
+### Fixed
+- **Vulnerable dev dependency:** Updated `crossbeam-epoch` to 0.9.20 in the lockfile to resolve RUSTSEC-2026-0204, and removed an unused `serde` dependency from the Python binding crate.
+- **Non-UTF-8 canonical paths:** CLI context, splice, and manifest commands now return a structured error instead of panicking when symlink resolution produces a non-UTF-8 path.
+- **Indentation style preservation:** Auto-indent now normalizes a replacement's common base prefix to the surrounding tab/space style while preserving relative whitespace and line endings. Validation no longer accepts a numerically wide but style-incompatible prefix, and dedented closers cannot trigger arithmetic underflow.
+- **Manifest range overlap:** CLI and Python manifests now reject intersecting ranges with different start lines instead of allowing later operations to overwrite earlier output silently.
+- **Python backup purge count:** The Python purge API now returns the number of backups actually removed while the Rust unit-returning API remains backward compatible.
+- **Python binding parity:** Atomic writes can create a missing target, and file-size check failures use the documented I/O exception class.
+- **Release automation:** CI now targets the repository's `master` branch and tests the declared Rust 1.87 MSRV.
+- **Python compatibility:** Linux wheels use the CPython stable ABI from Python 3.10, matching the package's declared Python 3.10+ support.
+- **Documentation parity:** Installation and usage examples now reference the published `moesniper` distribution and module, and dependency versions match the manifests.
+- **Python pre-commit hooks:** Corrected the Ruff hook identifier so the pinned pre-commit environment can initialize and run.
+- **Crate contents:** Excluded the local Moegraph scanner configuration from crates.io artifacts.
+- **Wheel contents:** Excluded interpreter bytecode and `__pycache__` directories from Python artifacts.
+- **Configuration overflow:** Oversized file-size suffixes are rejected and extreme backup-age values saturate safely instead of overflowing arithmetic.
+- **Rustfmt configuration:** Removed a nightly-only option that stable rustfmt ignored with repeated warnings.
+
+### Added
+- **Dependency policy gates:** Restored the cargo-deny policy and added cargo-machete to CI and release documentation.
+
 ## [0.7.12] - 2026-06-19
 
 ### Changed
@@ -270,21 +291,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release.
 - Core splicing functionality.
 - Hex decode/encode.
-
----
-
-## Version History
-
-| Version | Date | Key Feature |
-|---------|------|-------------|
-| 0.7.4 | 2026-06-06 | Release tooling, .agents/ gitignore |
-| 0.7.3 | 2026-06-04 | Python bindings parity, PyO3 safety |
-| 0.7.2 | 2026-06-03 | PID pacing, config forwarding, risk telemetry |
-| 0.7.1 | 2026-06-01 | Append-at-end fix, manifest bounds, permission preservation, perf optimization |
-| 0.7.0 | 2026-05-30 | Indent engine, PID locks, context verification, docs unification |
-| 0.5.1 | 2026-05-14 | Test suite expansion, help text refactor |
-| 0.5.0 | 2026-05-14 | Enterprise security, auto-indent, dry-run |
-| 0.4.0 | 2025-04-22 | Manifest operations, multi-step undo |
-| 0.3.0 | 2025-04-21 | Basic splicing, hex encoding |
-| 0.2.0 | 2025-04-20 | CLI, deletion support |
-| 0.1.0 | 2025-04-19 | Initial release |

@@ -2,19 +2,19 @@
 
 > Python bindings for moesniper — escape-proof precision file editor for LLM agents.
 
-[![PyPI](https://img.shields.io/pypi/v/sniper-py)](https://pypi.org/project/sniper-py/)
+[![PyPI](https://img.shields.io/pypi/v/moesniper)](https://pypi.org/project/moesniper/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)]()
 [![Python: 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 ## Installation
 
 ```bash
-pip install sniper-py
+pip install moesniper
 ```
 
 ## Overview
 
-`sniper-py` provides native Python bindings to the [`moesniper`](https://github.com/moeshawky/moesniper) Rust CLI — an escape-proof precision file editor designed for LLM agents. All file edits are:
+`moesniper` provides native Python bindings to the [`moesniper`](https://github.com/moeshawky/moesniper) Rust CLI — an escape-proof precision file editor designed for LLM agents. All file edits are:
 
 - **Hex-encoded** to prevent shell corruption
 - **Atomic** (temp file + rename — never inconsistent)
@@ -24,12 +24,12 @@ pip install sniper-py
 ## Usage
 
 ```python
-from sniper import splice
+import moesniper
 
-# Replace lines 5-5 with hex-encoded content
-result = splice("file.rs", start=5, end=5, hex_content="68656c6c6f")
-print(result.status)  # "ok"
-print(result.line_shift)  # 0
+# Replace line 5 with plaintext content. The binding handles encoding internally.
+result = moesniper.edit("file.rs", start=5, end=5, content="hello")
+print(result["status"])  # "ok"
+print(result["lines_inserted"])  # 1
 ```
 
 ## Features

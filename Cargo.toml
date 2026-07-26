@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "moesniper"
-version = "0.7.12"
+version = "0.7.13"
 edition = "2021"
 description = "Escape-proof precision file editor for LLM agents. Hex-encoded content, line-range splicing, atomic writes."
 license = "MIT"
@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 repository = "https://github.com/moeshawky/moesniper"
 readme = "README.md"
 rust-version = "1.87"
-exclude = [".moegraph/", "deny.toml"]
+exclude = [".moegraph/", ".moeinclude", "deny.toml"]
 
 [[bin]]
 name = "sniper"
@@ -38,6 +38,10 @@ llmosafe = { version = "0.7.7", features = ["testing"] }
 [[bench]]
 name = "sniper_bench"
 harness = false
+
+[package.metadata.cargo-machete]
+# Explicit project policy; no dependency false-positive exceptions are allowed.
+ignored = []
 
 # ── Lint Policy ──────────────────────────────────────────────────────────────
 # CI: cargo clippy --all-targets -- -D warnings (all warnings are errors).

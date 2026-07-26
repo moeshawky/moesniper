@@ -264,9 +264,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "moesniper"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "criterion",
  "llmosafe",
@@ -940,12 +940,11 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "sniper-py"
-version = "0.7.12"
+version = "0.7.13"
 dependencies = [
  "llmosafe",
  "moesniper",
  "pyo3",
- "serde",
  "serde_json",
 ]
 

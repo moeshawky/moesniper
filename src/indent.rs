@@ -376,19 +376,21 @@ pub fn validate_indentation(
     replacement_lines: &[String],
 ) -> (bool, Option<String>, Option<String>) {
     let (style, expected_level) = detect_expected_indent(all_lines, start_line);
-    let expected_indent = style.indent_string(expected_level);
+    let replacement_refs: Vec<&str> = replacement_lines.iter().map(String::as_str).collect();
+    let expected_indent = effective_indent_for_content(&style, expected_level, &replacement_refs);
 
     let mut has_content = false;
     let mut min_leading = usize::MAX;
+    let mut prefix_matches = true;
 
     for line in replacement_lines.iter().filter(|l| !l.trim().is_empty()) {
         has_content = true;
-        let trimmed = line.trim_start();
-        if trimmed.starts_with(')') || trimmed.starts_with('}') || trimmed.starts_with(']') {
+        if is_closer_line(line) {
             continue;
         }
-        let leading = line.chars().take_while(|c| c.is_whitespace()).count();
+        let leading = count_leading_whitespace(line);
         min_leading = min_leading.min(leading);
+        prefix_matches &= line.starts_with(&expected_indent);
     }
 
     if !has_content {
@@ -397,42 +399,69 @@ pub fn validate_indentation(
 
     let expected_spaces = expected_indent.len();
     let style_desc = if style.uses_tabs {
-        format!("{} tab(s)", expected_level)
+        format!("{} tab(s)", expected_indent.len())
     } else {
         format!("{} space(s)", expected_spaces)
     };
 
-    if min_leading < expected_spaces {
-        let diff = expected_spaces - min_leading;
+    if min_leading < expected_spaces || !prefix_matches {
+        let actual_leading = if min_leading == usize::MAX {
+            0
+        } else {
+            min_leading
+        };
+        let diff = expected_spaces.abs_diff(actual_leading);
         let warning = format!(
-            "INDENTATION WARNING: Replacement has {} leading {}, expected {} (diff: {})",
-            min_leading,
-            if style.uses_tabs {
-                "tab(s)"
-            } else {
-                "space(s)"
-            },
+            "INDENTATION WARNING: Replacement has {} leading whitespace character(s), expected prefix {} (diff: {})",
+            actual_leading,
             style_desc,
             diff
         );
 
-        let fix = replacement_lines
-            .iter()
-            .map(|line| {
-                if line.trim().is_empty() {
-                    line.clone()
-                } else {
-                    let stripped = line.trim_start();
-                    format!("{}{}", expected_indent, stripped)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let content = replacement_lines.concat();
+        let fix = auto_indent_content(all_lines, start_line, &content);
 
         (false, Some(warning), Some(fix))
     } else {
         (true, None, None)
     }
+}
+
+fn is_closer_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('}') || trimmed.starts_with(')') || trimmed.starts_with(']')
+}
+
+fn effective_indent_for_content(
+    style: &IndentStyle,
+    expected_level: usize,
+    content_lines: &[&str],
+) -> String {
+    let starts_with_closer = content_lines
+        .iter()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| is_closer_line(line));
+    let effective_level = if starts_with_closer {
+        expected_level.saturating_sub(1)
+    } else {
+        expected_level
+    };
+    style.indent_string(effective_level)
+}
+
+/// Removes exactly `count` leading whitespace characters, retaining every
+/// remaining byte (including relative indentation and line endings).
+fn remove_leading_whitespace(line: &str, count: usize) -> &str {
+    let mut byte_offset = 0;
+
+    for (removed, (index, ch)) in line.char_indices().enumerate() {
+        if removed == count || !ch.is_whitespace() {
+            break;
+        }
+        byte_offset = index + ch.len_utf8();
+    }
+
+    &line[byte_offset..]
 }
 
 // ————————————————————————————————————————————————————————————————————————————————
@@ -446,50 +475,34 @@ pub fn validate_indentation(
 /// This preserves internal indentation structure (multi-level content) while
 /// fixing the base level.
 ///
-/// If the content is already at or above the expected indent level (i.e. the
-/// LLM sent correctly indented content), the content is returned unchanged.
+/// If the content is already at or above the expected indent level and begins
+/// with the expected tab/space prefix, the content is returned unchanged.
 pub fn auto_indent_content(all_lines: &[String], start_line: usize, content: &str) -> String {
     let (style, expected_level) = detect_expected_indent(all_lines, start_line);
-    let expected_indent = style.indent_string(expected_level);
+    let content_lines: Vec<&str> = content.split_inclusive('\n').collect();
+    let effective_indent = effective_indent_for_content(&style, expected_level, &content_lines);
 
-    if expected_indent.is_empty() {
+    if effective_indent.is_empty() {
         return content.to_string();
     }
-
-    let content_lines: Vec<&str> = content.lines().collect();
 
     // Compute minimum leading whitespace, skipping closer tokens
     // (}, ), ]) — closer tokens are at a different indent level by design
     // and should not drag down the min_leading for body content.
     // This mirrors validate_indentation's closer-token skip.
-    let is_closer = |l: &&str| -> bool {
-        let t = l.trim();
-        t.starts_with('}') || t.starts_with(')') || t.starts_with(']')
-    };
     let min_leading = content_lines
         .iter()
-        .filter(|l| !l.trim().is_empty() && !is_closer(l))
-        .map(|l| l.chars().take_while(|c| c.is_whitespace()).count())
+        .filter(|line| !line.trim().is_empty() && !is_closer_line(line))
+        .map(|line| count_leading_whitespace(line))
         .min()
         .unwrap_or(0);
 
-    // If content starts with a closer token (}, ), ]), the whole block
-    // should be at one level less indentation than body content — the
-    // closer closes the current block, so content after it is at the
-    // block level.  This mirrors validate_indentation's closer skip.
-    let first_nonempty = content_lines.iter().find(|l| !l.trim().is_empty());
-    let starts_with_closer = first_nonempty.is_some_and(|l| {
-        let t = l.trim();
-        t.starts_with('}') || t.starts_with(')') || t.starts_with(']')
-    });
-    let effective_level = if starts_with_closer {
-        expected_level.saturating_sub(1)
-    } else {
-        expected_level
-    };
-    let effective_indent = style.indent_string(effective_level);
+    let prefix_matches = content_lines
+        .iter()
+        .filter(|line| !line.trim().is_empty() && !is_closer_line(line))
+        .all(|line| line.starts_with(&effective_indent));
 
-    if min_leading >= effective_indent.len() {
+    if min_leading >= effective_indent.len() && prefix_matches {
         return content.to_string();
     }
 
@@ -499,45 +512,55 @@ pub fn auto_indent_content(all_lines: &[String], start_line: usize, content: &st
             if line.trim().is_empty() {
                 (*line).to_string()
             } else {
-                let leading = line.chars().take_while(|c| c.is_whitespace()).count();
-                let overhang = leading - min_leading;
-                let indent_char = if style.uses_tabs { '\t' } else { ' ' };
-                // BUG FIX: base indent uses style char, overhang is always spaces
-                let base = indent_char.to_string().repeat(effective_indent.len());
-                let overhang_spaces = " ".repeat(overhang);
-                format!("{}{}{}", base, overhang_spaces, line.trim_start())
+                let leading = count_leading_whitespace(line);
+                if leading < min_leading {
+                    // A closer may be intentionally dedented below the body minimum.
+                    // Preserve that relative indentation and avoid underflow.
+                    (*line).to_string()
+                } else {
+                    let relative = remove_leading_whitespace(line, min_leading);
+                    format!("{effective_indent}{relative}")
+                }
             }
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect()
 }
 
 // ————————————————————————————————————————————————————————————————————————————————
 // needs_indent_fix
 // ————————————————————————————————————————————————————————————————————————————————
 
-/// Returns true if the content's minimum indentation is less than expected.
+/// Returns true if any content line is shallower than the expected indentation
+/// or does not begin with the surrounding context's tab/space prefix.
 pub fn needs_indent_fix(all_lines: &[String], start_line: usize, content: &str) -> bool {
     let (style, expected_level) = detect_expected_indent(all_lines, start_line);
-    let expected_indent = style.indent_string(expected_level);
+    let content_lines: Vec<&str> = content.split_inclusive('\n').collect();
+    let expected_indent = effective_indent_for_content(&style, expected_level, &content_lines);
 
     if expected_indent.is_empty() {
         return false;
     }
 
     // Skip closer tokens for min_leading (same rationale as auto_indent_content)
-    let is_closer = |l: &&str| -> bool {
-        let t = l.trim();
-        t.starts_with('}') || t.starts_with(')') || t.starts_with(']')
-    };
-    let min_leading = content
-        .lines()
-        .filter(|l| !l.trim().is_empty() && !is_closer(l))
-        .map(|l| l.chars().take_while(|c| c.is_whitespace()).count())
-        .min()
-        .unwrap_or(0);
+    let mut body_lines = content_lines
+        .iter()
+        .filter(|line| !line.trim().is_empty() && !is_closer_line(line))
+        .peekable();
 
-    min_leading < expected_indent.len()
+    if body_lines.peek().is_none() {
+        return content_lines
+            .iter()
+            .find(|line| !line.trim().is_empty())
+            .is_some_and(|line| {
+                count_leading_whitespace(line) < expected_indent.len()
+                    || !line.starts_with(&expected_indent)
+            });
+    }
+
+    body_lines.any(|line| {
+        count_leading_whitespace(line) < expected_indent.len()
+            || !line.starts_with(&expected_indent)
+    })
 }
 
 // ————————————————————————————————————————————————————————————————————————————————
@@ -935,12 +958,70 @@ mod tests {
             .map(|_| "\tfn foo() {".to_string())
             .chain(std::iter::once("\t\tpass".to_string()))
             .collect();
-        // Content already has 4 spaces of indent, expected is 2 tabs (len=2).
-        // Guard: min_leading(4) >= expected_indent.len()(2) → content left unchanged.
-        // Style mismatch is handled by validate_indentation, not auto_indent.
+        // Content has the wrong base style: four spaces instead of two tabs.
         let content = "    print('hello')";
         let fixed = auto_indent_content(&lines, 31, content);
-        assert_eq!(fixed, "    print('hello')");
+        assert_eq!(fixed, "\t\tprint('hello')");
+    }
+
+    #[test]
+    fn test_auto_indent_preserves_exact_relative_whitespace() {
+        let lines: Vec<String> = (0..30)
+            .map(|_| "\tfn foo() {".to_string())
+            .chain(std::iter::once("\t\tpass".to_string()))
+            .collect();
+        let content = "outer\n\tinner_tab\n    inner_spaces\n";
+        let fixed = auto_indent_content(&lines, 31, content);
+        assert_eq!(fixed, "\t\touter\n\t\t\tinner_tab\n\t\t    inner_spaces\n");
+    }
+
+    #[test]
+    fn test_auto_indent_normalizes_tab_base_in_space_file() {
+        let lines = vec!["def foo():\n".to_string(), "    pass\n".to_string()];
+        let content = "\tprint('hello')";
+        assert!(needs_indent_fix(&lines, 2, content));
+        assert_eq!(
+            auto_indent_content(&lines, 2, content),
+            "    print('hello')"
+        );
+    }
+
+    #[test]
+    fn test_auto_indent_underindented_body_with_closer_does_not_underflow() {
+        let lines = vec![
+            "fn outer() {\n".to_string(),
+            "    if condition {\n".to_string(),
+            "        placeholder();\n".to_string(),
+        ];
+        let content = "    replacement();\n}\n";
+        assert_eq!(
+            auto_indent_content(&lines, 3, content),
+            "        replacement();\n}\n"
+        );
+    }
+
+    #[test]
+    fn test_needs_indent_fix_only_closer_uses_effective_level() {
+        let lines = vec![
+            "fn outer() {\n".to_string(),
+            "    if condition {\n".to_string(),
+            "        placeholder();\n".to_string(),
+        ];
+        assert!(needs_indent_fix(&lines, 3, "}"));
+        assert_eq!(auto_indent_content(&lines, 3, "}"), "    }");
+    }
+
+    #[test]
+    fn test_validate_rejects_wrong_indent_style_with_sufficient_width() {
+        let lines: Vec<String> = (0..30)
+            .map(|_| "\tfn foo() {".to_string())
+            .chain(std::iter::once("\t\tpass".to_string()))
+            .collect();
+        let replacement = vec!["    print('hello')\n".to_string()];
+        let (valid, warning, suggested) = validate_indentation(&lines, 31, &replacement);
+        assert!(!valid);
+        assert!(warning.is_some());
+        assert_eq!(suggested.as_deref(), Some("\t\tprint('hello')\n"));
     }
 
     #[test]
@@ -1254,14 +1335,8 @@ mod tests {
             .map(|_| "\tfn foo() {}".to_string())
             .chain(std::iter::once("\t\tpass".to_string()))
             .collect();
-        // File uses tabs, expected level 2 (two tabs).
-        // Content uses 4 spaces — min_leading=4 >= expected_indent.len()(2) → false
-        // But the content uses SPACES while the file uses TABS!
-        // The indent styles are mismatched even though the widths are similar.
-        // This test verifies that needs_indent_fix only checks width, not style.
-        // Current behavior: it returns false (4 >= 2), which means the content
-        // "appears" correct but actually uses wrong whitespace character.
-        assert!(!needs_indent_fix(&lines, 31, "    print('hello')"));
+        // Raw character count is large enough, but the context prefix is two tabs.
+        assert!(needs_indent_fix(&lines, 31, "    print('hello')"));
     }
 
     // --- BUG 7: auto_indent_content with empty file ---

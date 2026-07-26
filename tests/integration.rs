@@ -39,6 +39,30 @@ fn test_atomic_write_preserves_permissions() {
 }
 
 #[test]
+fn test_cli_auto_indent_normalizes_spaces_to_tab_context() {
+    let dir = TempDir::new().unwrap();
+    let file_path = dir.path().join("tabs.py");
+    fs::write(&file_path, "def outer():\n\texisting()\n\tafter()\n").unwrap();
+
+    let status = sniper()
+        .args([
+            file_path.to_str().unwrap(),
+            "2",
+            "2",
+            "202020207265706c6163656d656e7428290a",
+            "--auto-indent",
+        ])
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert_eq!(
+        fs::read_to_string(&file_path).unwrap(),
+        "def outer():\n\treplacement()\n\tafter()\n"
+    );
+}
+
+#[test]
 fn test_multi_step_undo_stack() {
     let dir = TempDir::new().unwrap();
     let file_path = dir.path().join("stack.txt");

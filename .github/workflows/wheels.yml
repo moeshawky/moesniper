@@ -4,9 +4,7 @@
 # This is the CANONICAL workflow. All three projects use identical copies.
 # Only the PROJECT env var below differs. Do NOT diverge from this template.
 #
-# Canonical source: /workspace/.github/workflows/wheels.yml
-# Local build:      /workspace/.github/scripts/build-wheels.sh
-# Reference:        /workspace/PUBLISHING.md
+# Release reference: PUBLISHING.md
 #
 # To adopt for a new project:
 #   1. Copy this file to .github/workflows/wheels.yml
@@ -21,6 +19,9 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 # ── Project identity (ONLY line that differs between projects) ──────────────
 env:
@@ -55,10 +56,10 @@ jobs:
               sudo apt-get update && sudo apt-get install -y build-essential || true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Build wheel
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           working-directory: ${{ env.PROJECT }}-py
           args: --release --out dist -i python${{ env.PYTHON_VERSION }}
@@ -66,7 +67,7 @@ jobs:
           before-script-linux: ${{ matrix.pre-build }}
 
       - name: Upload wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: wheels-linux-${{ matrix.target }}
           path: ${{ env.PROJECT }}-py/dist/
@@ -80,17 +81,18 @@ jobs:
     if: always() && !cancelled() && !failure()
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       id-token: write
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: wheels-*
           path: dist
           merge-multiple: true
 
       - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: dist
@@ -113,17 +115,18 @@ jobs:
       name: pypi
       url: https://pypi.org/p/${{ env.PROJECT == 'ix' && 'moeix' || env.PROJECT == 'sniper' && 'moesniper' || 'llmosafe' }}
     permissions:
+      contents: read
       id-token: write
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: wheels-*
           path: dist
           merge-multiple: true
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # release/v1
         with:
           packages-dir: dist
           skip-existing: true

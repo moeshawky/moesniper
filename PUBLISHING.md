@@ -1,6 +1,6 @@
 # Publishing moesniper — Success Log & Reference
 
-> This document records the exact steps that successfully published moesniper v0.7.10 to PyPI, TestPyPI, crates.io, and GitHub Releases. Use this as the canonical reference for future releases.
+> This document records the release procedure for PyPI, TestPyPI, crates.io, and GitHub Releases. The last published release is v0.7.12.
 
 ---
 
@@ -8,14 +8,11 @@
 
 | Registry | Package | Version | Status |
 |----------|---------|---------|--------|
-| **PyPI** | `moesniper` | 0.7.10 | ✅ Published |
-| **TestPyPI** | `moesniper` | 0.7.10 | ✅ Published |
-| **crates.io** | `moesniper` | 0.7.10 | ✅ Published |
-| **GitHub Release** | `moesniper` | v0.7.10 | ✅ Created |
+| **PyPI** | `moesniper` | 0.7.12 | ✅ Published |
+| **crates.io** | `moesniper` | 0.7.12 | ✅ Published |
+| **GitHub Release** | `moesniper` | v0.7.12 | ✅ Created |
 
-**Wheels built:**
-- `moesniper-0.7.10-cp312-cp312-linux_x86_64.whl`
-- `moesniper-0.7.10.tar.gz`
+Linux wheels use the CPython 3.10 stable ABI (`cp310-abi3`) and target x86_64 and aarch64.
 
 ---
 
@@ -43,13 +40,13 @@ Before tagging, update **ALL THREE** version locations:
 
 ```bash
 # 1. Cargo.toml (workspace root)
-# version = "0.7.8"
+# version = "X.Y.Z"
 
 # 2. sniper-py/Cargo.toml
-# version = "0.7.8"
+# version = "X.Y.Z"
 
 # 3. sniper-py/pyproject.toml (CRITICAL - maturin reads this!)
-# version = "0.7.8"
+# version = "X.Y.Z"
 ```
 
 > **⚠️ GOTCHA**: Maturin reads version from `sniper-py/pyproject.toml` `[project]` section, NOT from Cargo.toml. Forgetting this produces wheels with the old version.
@@ -60,19 +57,34 @@ Before tagging, update **ALL THREE** version locations:
 
 ### 1. Prepare Changes
 ```bash
-# Ensure all tests pass
+# Ensure formatting and lints are clean
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+
+# Ensure all tests and documentation pass
 cargo test --workspace
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
-# Ensure clippy clean
-cargo clippy --all-targets -- -D warnings
+# Audit advisories, licenses, dependency sources, and unused dependencies
+cargo deny check
+cargo machete
 
-# Update CHANGELOG.md with [Unreleased] section
+# Verify package contents and registry acceptance
+cargo package -p moesniper --list
+cargo publish -p moesniper --dry-run --locked
+cd sniper-py
+maturin build --release --out dist
+twine check dist/*.whl
+cd ..
+
+# Update CHANGELOG.md with a dated release section and synchronize all versions
 ```
 
 ### 2. Commit & Tag
 ```bash
-git add -A
-git commit -m "chore: bump version to X.Y.Z"
+git status --short
+git add <reviewed-files>
+git commit -m "Prepare vX.Y.Z release"
 git tag vX.Y.Z
 git push origin master
 git push origin vX.Y.Z
@@ -102,20 +114,16 @@ gh run list --repo moeshawky/moesniper --limit 5
 
 | File | Purpose | Key Config |
 |------|---------|------------|
-| `wheels.yml` | PyPI + TestPyPI | `PROJECT: sniper`, `PYTHON_VERSION: "3.12"` |
-| `publish-cratesio.yml` | crates.io | `PROJECT: sniper`, `PUBLISH_FLAGS: ""` |
+| `wheels.yml` | PyPI + TestPyPI | `PROJECT: sniper`, CPython 3.10 stable ABI |
+| `publish-cratesio.yml` | crates.io | `PROJECT: sniper`, `PUBLISH_FLAGS: "-p moesniper"` |
 | `release.yml` | GitHub Release | Simple tag release, auto notes |
-
-**All three are copies of master templates at `/workspace/.github/workflows/`.**
-
----
 
 ## Build Matrix (wheels.yml)
 
 | OS | Runner | Target | manylinux | Output Tag |
 |----|--------|--------|-----------|------------|
-| Ubuntu 24.04 | `ubuntu-latest` | x86_64 | `auto` | `manylinux_2_17_x86_64` |
-| Ubuntu 24.04 ARM | `ubuntu-24.04-arm` | aarch64 | `auto` | `manylinux_2_17_aarch64` |
+| Ubuntu 24.04 | `ubuntu-latest` | x86_64 | `auto` | `cp310-abi3-manylinux_*_x86_64` |
+| Ubuntu 24.04 ARM | `ubuntu-24.04-arm` | aarch64 | `auto` | `cp310-abi3-manylinux_*_aarch64` |
 
 > **CRITICAL**: aarch64 MUST use `manylinux: auto` (not `"off"`). PyPI rejects `linux_aarch64` platform tag.
 
@@ -144,15 +152,16 @@ gh run list --repo moeshawky/moesniper --limit 5
 If CI fails, you can publish manually:
 
 ```bash
-# Build wheels locally (requires maturin, docker for cross-compile)
-/workspace/.github/scripts/build-wheels.sh sniper          # x86_64
-/workspace/.github/scripts/build-wheels.sh sniper --target aarch64  # ARM64
+# Build the local-platform wheel
+cd sniper-py
+maturin build --release --out dist
 
 # Publish to PyPI
-uv publish /workspace/sniper/sniper-py/dist/*.whl
+uv publish dist/*.whl
 
 # Publish to crates.io
-cd /workspace/sniper && cargo publish
+cd ..
+cargo publish -p moesniper --locked
 
 # GitHub Release
 gh release create vX.Y.Z --generate-notes
@@ -160,12 +169,4 @@ gh release create vX.Y.Z --generate-notes
 
 ---
 
-## Related Files
-
-- `/workspace/PUBLISHING.md` — Master template for all workspace projects
-- `/workspace/.github/scripts/build-wheels.sh` — Unified wheel builder
-- `/workspace/.github/workflows/` — Master workflow templates
-
----
-
-*Last successful release: v0.7.10 (2026-06-15)*
+*Last successful release: v0.7.12 (2026-06-19)*

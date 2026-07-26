@@ -19,4 +19,5 @@ Feature requests are welcome! Use the "Feature Request" template in the Issue tr
 ## Style Guide
 - Follow standard Rust idioms.
 - Use `cargo clippy` to check for issues.
+- Run `cargo deny check` and `cargo machete` when changing dependencies.
 - Document public APIs.

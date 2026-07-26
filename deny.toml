@@ -1,0 +1,39 @@
+# cargo-deny policy for dependency advisories, licenses, sources, and duplication.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# Transitive build dependency: llmosafe 0.7.7 -> cbindgen 0.26 -> clap 3 -> atty.
+# RUSTSEC reports no safe upgrade. Remove this exception when upstream drops atty.
+ignore = ["RUSTSEC-2024-0375"]
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+]
+exceptions = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

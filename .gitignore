@@ -15,11 +15,15 @@ AGENTS.md
 references/
 .cursor/
 .claude/
+.relay/
 .ad-*.md
 .cam-*.md
 .cbp-*.md
 .clippy-fixes.md
 extract.md
+
+# ── Local MCP configuration ────────────────────────────────────────────────────
+.mcp.json
 
 # ── IDE / Editor ──────────────────────────────────────────────────────────────
 .idea/
@@ -61,7 +65,7 @@ __pycache__/
 
 # ── Python native extensions (PyO3) ─────────────────────────────────────────
 *.so
-deny.toml
 .moegraph/
 publishing.md
 sniper-py/.venv/
+sniper-py/dist/

@@ -5,8 +5,8 @@
 //! All assertions use exact comparisons — no substring/oracle looseness.
 
 use moesniper::{
-    check_file_size, create_backup, hex_decode, normalize_path, purge_old_backups, write_atomic,
-    SniperConfig, SniperLock,
+    check_file_size, create_backup, hex_decode, hex_encode, normalize_path, purge_old_backups,
+    write_atomic, SniperConfig, SniperLock,
 };
 use std::fs;
 use std::io::Write;
@@ -738,6 +738,157 @@ fn test_normalize_path_absolute() {
     assert!(
         result.unwrap().is_absolute(),
         "Normalized path must be absolute"
+    );
+}
+
+// =========================================================================
+// Manifest overlap detection — CLI path
+// =========================================================================
+
+#[test]
+fn test_manifest_cli_overlap_different_starts_rejected() {
+    let dir = TempDir::new().unwrap();
+    let file_path = dir.path().join("overlap_test.txt");
+    fs::write(&file_path, "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n").unwrap();
+
+    let manifest_json = serde_json::json!([
+        {"start": 3, "end": 6, "hex": hex_encode(b"x\ny\nz\nw\n")},
+        {"start": 5, "end": 8, "hex": hex_encode(b"1\n2\n3\n4\n")},
+    ]);
+
+    let output = std::process::Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            file_path.to_str().unwrap(),
+            "--manifest",
+            "/dev/stdin",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let mut child = output;
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin
+            .write_all(manifest_json.to_string().as_bytes())
+            .unwrap();
+    }
+    let result = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        !result.status.success(),
+        "Overlapping manifest should fail: stderr={}",
+        stderr
+    );
+    assert!(
+        stderr.contains("overlap"),
+        "Error must contain 'overlap', got: {}",
+        stderr
+    );
+    // File must be unchanged
+    let content = read_file(&file_path);
+    assert_eq!(
+        content, "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n",
+        "File must be unmodified after overlap rejection"
+    );
+}
+
+#[test]
+fn test_manifest_cli_containment_overlap_rejected() {
+    let dir = TempDir::new().unwrap();
+    let file_path = dir.path().join("containment_test.txt");
+    fs::write(&file_path, "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n").unwrap();
+
+    // [2,9] fully contains [5,6]
+    let manifest_json = serde_json::json!([
+        {"start": 2, "end": 9, "hex": hex_encode(b"x\ny\nz\nw\np\nq\nr\ns\n")},
+        {"start": 5, "end": 6, "hex": hex_encode(b"1\n2\n")},
+    ]);
+
+    let output = std::process::Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            file_path.to_str().unwrap(),
+            "--manifest",
+            "/dev/stdin",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let mut child = output;
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin
+            .write_all(manifest_json.to_string().as_bytes())
+            .unwrap();
+    }
+    let result = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        !result.status.success(),
+        "Containment overlap should fail: stderr={}",
+        stderr
+    );
+    assert!(
+        stderr.contains("overlap"),
+        "Error must contain 'overlap', got: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_manifest_cli_adjacent_ranges_accepted() {
+    let dir = TempDir::new().unwrap();
+    let file_path = dir.path().join("adjacent_test.txt");
+    fs::write(&file_path, "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n").unwrap();
+
+    // [3,4] and [5,6] are adjacent — no overlap
+    let manifest_json = serde_json::json!([
+        {"start": 3, "end": 4, "hex": hex_encode(b"x\ny\n")},
+        {"start": 5, "end": 6, "hex": hex_encode(b"1\n2\n")},
+    ]);
+
+    let output = std::process::Command::new("cargo")
+        .args([
+            "run",
+            "--quiet",
+            "--",
+            file_path.to_str().unwrap(),
+            "--manifest",
+            "/dev/stdin",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let mut child = output;
+    {
+        let stdin = child.stdin.as_mut().unwrap();
+        stdin
+            .write_all(manifest_json.to_string().as_bytes())
+            .unwrap();
+    }
+    let result = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    assert!(
+        result.status.success(),
+        "Adjacent ranges should succeed: stderr={}",
+        stderr
     );
 }
 

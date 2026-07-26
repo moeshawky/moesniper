@@ -269,6 +269,12 @@ class TestValidateIndentation:
         result = sniper.validate_indentation(str(indented_file), 2, "    print('hello')")
         assert result["valid"] is True
 
+    def test_wrong_style_with_sufficient_width_is_rejected(self, sniper, test_file):
+        """Spaces do not satisfy a tab-indented context by raw width alone."""
+        test_file.write_text("def foo():\n\tpass\n\tafter\n")
+        result = sniper.validate_indentation(str(test_file), 2, "    print('hello')")
+        assert result["valid"] is False
+
 
 class TestAutoIndentContent:
     """Test auto_indent_content Python binding."""
@@ -278,6 +284,20 @@ class TestAutoIndentContent:
         test_file.write_text("def foo():\n    pass\n")
         result = sniper.auto_indent_content(str(test_file), 2, "print('hello')")
         assert result == "    print('hello')"
+
+    def test_preserves_relative_tabs_spaces_and_trailing_newline(self, sniper, test_file):
+        """Only the common base changes; relative whitespace remains exact."""
+        test_file.write_text("def foo():\n\tpass\n\tafter\n")
+        content = "outer\n\tinner_tab\n    inner_spaces\n"
+        result = sniper.auto_indent_content(str(test_file), 2, content)
+        assert result == "\touter\n\t\tinner_tab\n\t    inner_spaces\n"
+
+    def test_edit_normalizes_space_base_to_tab_context(self, sniper, test_file):
+        """The Python edit path inherits base-style normalization."""
+        test_file.write_text("def foo():\n\tpass\n\tafter\n")
+        result = sniper.edit(str(test_file), 2, 2, "    replacement()\n", auto_indent=True)
+        assert result["status"] == "ok"
+        assert test_file.read_text() == "def foo():\n\treplacement()\n\tafter\n"
 
 
 class TestNeedsIndentFix:
@@ -488,3 +508,63 @@ class TestManifestIndent:
         ops = json.dumps([{"start": 1, "end": 1, "hex": sniper.encode("x")}])
         result = sniper.manifest(path, ops, auto_indent=True)
         assert result["status"] == "ok"
+
+    def test_manifest_overlap_different_starts_rejected(self, sniper, test_file):
+        """Manifest with overlapping different-start ranges is rejected."""
+        path = str(test_file)
+        # [2,4] and [3,5] overlap at lines 3-4
+        ops = json.dumps(
+            [
+                {"start": 2, "end": 4, "hex": sniper.encode("a\nb\nc\n")},
+                {"start": 3, "end": 5, "hex": sniper.encode("x\ny\nz\n")},
+            ]
+        )
+        result = sniper.manifest(path, ops)
+        assert result["status"] == "error", f"Expected error, got {result}"
+        assert "overlap" in result["message"].lower(), f"Message: {result['message']}"
+
+    def test_manifest_containment_overlap_rejected(self, sniper, test_file):
+        """Manifest with containment overlap is rejected."""
+        path = str(test_file)
+        # [2,4] fully contains [3,3]
+        ops = json.dumps(
+            [
+                {"start": 2, "end": 4, "hex": sniper.encode("x\ny\nz\n")},
+                {"start": 3, "end": 3, "hex": sniper.encode("a\n")},
+            ]
+        )
+        result = sniper.manifest(path, ops)
+        assert result["status"] == "error", f"Expected error, got {result}"
+        assert "overlap" in result["message"].lower(), f"Message: {result['message']}"
+
+    def test_manifest_adjacent_ranges_accepted(self, sniper, test_file):
+        """Adjacent non-overlapping ranges are accepted."""
+        path = str(test_file)
+        # [1,2] and [3,4] are adjacent, no overlap
+        ops = json.dumps(
+            [
+                {"start": 1, "end": 2, "hex": sniper.encode("a\nb\n")},
+                {"start": 3, "end": 4, "hex": sniper.encode("x\ny\n")},
+            ]
+        )
+        result = sniper.manifest(path, ops)
+        assert result["status"] == "ok", f"Expected ok, got {result}"
+
+
+class TestPurgeCount:
+    """Test purge_old_backups returns actual count."""
+
+    def test_purge_returns_nonzero_count(self, sniper, test_file):
+        """purge_old_backups returns >0 when backups are removed."""
+        path = str(test_file)
+        # Create 5 edits to generate backups
+        for i in range(5):
+            content = f"v{i}\n"
+            with Path(path).open("w") as f:
+                f.write(content)
+            sniper.edit(path, 1, 1, content.encode().hex())
+
+        # Purge with retention=2: should remove 3 (5 - 2)
+        purged = sniper.purge_old_backups(path, 2, 0)
+        assert isinstance(purged, int), f"Expected int, got {type(purged)}"
+        assert purged > 0, f"Expected > 0, got {purged}"

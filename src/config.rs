@@ -56,11 +56,11 @@ pub struct SniperConfig {
     pub pid_base_ms: u64,
     /// Entropy scale factor for PID pacing.
     /// Valid range: 0.0-100.0. Negative, NaN, and Inf values are rejected.
-    /// Default: 0.5.
+    /// Default: 0.1.
     pub pid_entropy_scale: f64,
     /// Pressure scale factor for PID pacing.
     /// Valid range: 0.0-100.0. Negative, NaN, and Inf values are rejected.
-    /// Default: 1.0.
+    /// Default: 0.2.
     pub pid_pressure_scale: f64,
 }
 
@@ -179,13 +179,13 @@ fn parse_size(s: &str) -> Option<u64> {
     // Check for suffix
     if s.ends_with("GB") {
         let num = s[..s.len() - 2].trim().parse::<u64>().ok()?;
-        Some(num * 1024 * 1024 * 1024)
+        num.checked_mul(1024 * 1024 * 1024)
     } else if s.ends_with("MB") {
         let num = s[..s.len() - 2].trim().parse::<u64>().ok()?;
-        Some(num * 1024 * 1024)
+        num.checked_mul(1024 * 1024)
     } else if s.ends_with("KB") {
         let num = s[..s.len() - 2].trim().parse::<u64>().ok()?;
-        Some(num * 1024)
+        num.checked_mul(1024)
     } else if s.ends_with("B") {
         s[..s.len() - 1].trim().parse::<u64>().ok()
     } else {
@@ -242,6 +242,13 @@ mod tests {
         assert_eq!(parse_size("invalid"), None);
         assert_eq!(parse_size("MB"), None);
         assert_eq!(parse_size(""), None);
+    }
+
+    #[test]
+    fn test_parse_size_overflow_returns_none() {
+        assert_eq!(parse_size("18446744073709551615KB"), None);
+        assert_eq!(parse_size("18446744073709551615MB"), None);
+        assert_eq!(parse_size("18446744073709551615GB"), None);
     }
 
     #[test]

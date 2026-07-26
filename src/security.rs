@@ -162,7 +162,8 @@ pub fn validate_edit_target<P: AsRef<Path>>(filepath: P) -> Result<Option<String
     let path = filepath.as_ref();
 
     // Guard 1: block writes into special files (FIFOs, devices, etc.).
-    if !is_regular_file(path) {
+    // Non-existent paths are allowed — they will be created as regular files.
+    if path.exists() && !is_regular_file(path) {
         return Err(
             "target path is not a regular file (FIFOs, pipes, and devices are not supported)"
                 .into(),
