@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.14] - 2026-09-15
+
 ### Fixed
 - **Silent PID scale rejection:** Invalid `SNIPER_PID_ENTROPY_SCALE` / `SNIPER_PID_PRESSURE_SCALE` values (unparsable, out of range, NaN) now emit a stderr warning naming the offending value and the retained default instead of falling back silently.
 - **Python `sniper_undo` path parity:** `sniper_undo` now normalizes its path argument before lock/backup operations, matching `sniper_edit` and `sniper_manifest` — undo via a symlink or uncanonicalized path resolves backups in the correct file-relative `.sniper/` directory.
