@@ -70,6 +70,7 @@ _bugs/
 # ── Secrets / environment ─────────────────────────────────────────────────────
 .env
 .env.*
+.pypi-env
 *.key
 *.pem
 credentials.json
