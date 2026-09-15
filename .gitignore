@@ -55,9 +55,11 @@ _bugs/
 # CodeGraph index cache + local scanner config (.moeinclude stays tracked).
 .codegraph/
 .codegraphinclude
-# Local agent runtime (agent .md defs stay trackable; runtime does not).
-.opencode/node_modules/
-.opencode/*.log
+# Local agent workspace: defs, runtimes, and logs stay out of the public repo
+# (same precedent as AGENTS.md, which must stay gitignored). cargo publish
+# treats untracked files as a dirty tree, so the whole dir is ignored;
+# force-add with `git add -f` if a def must ever be shared for review.
+.opencode/
 # Local git hooks (shared hooks should be force-added deliberately).
 .githooks/
 
