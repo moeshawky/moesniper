@@ -41,7 +41,25 @@ desktop.ini
 
 # ── Project runtime ───────────────────────────────────────────────────────────
 .ix/
+.ixd.toml
 .sniper/
+**/.sniper/
+
+# ── Agentic / local telemetry (never published) ──────────────────────────────
+# Annotation-protocol working state (RNA proposals, bug ledgers). Promoted
+# findings live as docstrings in source; YAML ledgers stay local. Force-add
+# with `git add -f` if a ledger must be shared for a review.
+.annotations/
+**/.annotations/
+_bugs/
+# CodeGraph index cache + local scanner config (.moeinclude stays tracked).
+.codegraph/
+.codegraphinclude
+# Local agent runtime (agent .md defs stay trackable; runtime does not).
+.opencode/node_modules/
+.opencode/*.log
+# Local git hooks (shared hooks should be force-added deliberately).
+.githooks/
 
 # ── Proptest regressions ──────────────────────────────────────────────────────
 # Keep these in repo for reproducibility.
@@ -62,6 +80,15 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 *.egg
+*.whl
+
+# ── Python / Rust caches (regenerable) ───────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.venv/
+dist/
 
 # ── Python native extensions (PyO3) ─────────────────────────────────────────
 *.so

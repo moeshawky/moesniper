@@ -1,3 +1,6 @@
+//! Benchmark suite for sniper core operations.
+//! Measures split_inclusive performance and allocation characteristics.
+
 use criterion::{criterion_group, criterion_main, Criterion};
 
 fn my_benchmark(c: &mut Criterion) {

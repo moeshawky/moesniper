@@ -2255,7 +2255,8 @@ mod tests {
     /// BUG PROBE: start=1, end=0 — "insert at beginning"
     /// The CLI bounds check is: start<1 || end>lines.len() || start>end+1
     /// For start=1,end=0: start<1=false, 0>len=false, 1>0+1=>1>1=false → PASSES
-    /// The Python sniper_edit explicitly rejects end<start. Is this inconsistency a bug?
+    /// Python sniper_edit uses the identical bounds check (sniper-py/src/lib.rs:116),
+    /// so (1,0) inserts before line 1 there too — parity confirmed, no divergence.
     #[test]
     fn bug_probe_splice_start1_end0_insert_before_line1() {
         let dir = TempDir::new().unwrap();
@@ -2670,22 +2671,22 @@ mod tests {
     // BUG PROBE: PYTHON BINDINGS BOUNDS VALIDATION PARITY
     // =========================================================================
 
-    /// Python sniper_edit allows end = lines.len() + 1 for any valid start,
-    /// while Rust cmd_splice only allows it when start == lines.len() + 1.
-    /// This test documents the Rust behavior and serves as the parity spec.
+    /// Python sniper_edit uses the identical bounds check (`end > lines.len()`,
+    /// sniper-py/src/lib.rs:116) — parity confirmed. This test documents the
+    /// shared Rust/Python rejection of end = lines.len() + 1 for start < lines.len() + 1.
     #[test]
     fn bug_python_parity_end_bound_looser_than_rust() {
         let dir = TempDir::new().unwrap();
         // 3-line file
         let path = create_file(&dir, "parity_end.txt", "a\nb\nc\n");
         // end=4 = lines.len()+1, start=2 (not lines.len()+1)
-        // Python sniper_edit: checks `end > lines.len() + 1` → 4 > 4 → false → ALLOWS
-        // Rust cmd_splice: checks `end > lines.len()` → 4 > 3 → true → REJECTS
-        // (unless start == lines.len()+1 which it's not)
+        // Rust cmd_splice: `end > lines.len()` → 4 > 3 → true → REJECTS
+        // Python sniper_edit: identical check (sniper-py/src/lib.rs:116) → REJECTS
+        // (insert-at-end exception requires start == lines.len()+1, which it's not)
         let r = cmd_splice(&path, 2, 4, "new", false, false, false, None);
         assert_eq!(
             r.status, "error",
-            "Rust rejects end=lines.len()+1 when start < lines.len()+1 (Python allows this)"
+            "end=lines.len()+1 with start < lines.len()+1 rejected (Rust/Python parity)"
         );
     }
 

@@ -1,3 +1,9 @@
+//! CLI help text for the sniper command.
+//!
+//! Contains full usage instructions including commands, flags, context
+//! verification, encoding, manifest format, backup, indentation, and
+//! configuration environment variables.
+
 /// CLI help text for the sniper command.
 pub const HELP: &str = r#"sniper — escape-proof precision file editor for LLM agents
 

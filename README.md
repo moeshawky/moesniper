@@ -120,6 +120,11 @@ sniper file.rs 10 10 7878 --context 1a2b3c4d5e6f7a8b
 | `SNIPER_BACKUP_RETENTION_COUNT` | `50` | Number of backups to retain (`0` = unlimited) |
 | `SNIPER_BACKUP_MAX_AGE_DAYS` | `30` | Max backup age in days (`0` = no limit) |
 | `SNIPER_DISABLE_AUDIT` | (unset) | Set to any value to disable audit logging |
+| `SNIPER_PID_ENTROPY_SCALE` | `0.1` | Metabolic pacing entropy scale (`0.0`–`100.0`) |
+| `SNIPER_PID_PRESSURE_SCALE` | `0.2` | Metabolic pacing pressure scale (`0.0`–`100.0`) |
+
+Invalid numeric values (unparsable, out of range, or NaN) for the PID scales are
+ignored with a stderr warning naming the offending value; the default is retained.
 
 ## How It Works
 

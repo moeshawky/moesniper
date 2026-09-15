@@ -146,18 +146,30 @@ impl SniperConfig {
 
         // PID entropy scale: SNIPER_PID_ENTROPY_SCALE
         if let Ok(val) = env::var("SNIPER_PID_ENTROPY_SCALE") {
-            if let Ok(scale) = val.parse::<f64>() {
-                if (0.0..=100.0).contains(&scale) && !scale.is_nan() {
+            match val.parse::<f64>() {
+                Ok(scale) if (0.0..=100.0).contains(&scale) && !scale.is_nan() => {
                     config.pid_entropy_scale = scale;
+                }
+                _ => {
+                    eprintln!(
+                        "[SNIPER] Warning: ignoring invalid SNIPER_PID_ENTROPY_SCALE={:?}; using default 0.1",
+                        val
+                    );
                 }
             }
         }
 
         // PID pressure scale: SNIPER_PID_PRESSURE_SCALE
         if let Ok(val) = env::var("SNIPER_PID_PRESSURE_SCALE") {
-            if let Ok(scale) = val.parse::<f64>() {
-                if (0.0..=100.0).contains(&scale) && !scale.is_nan() {
+            match val.parse::<f64>() {
+                Ok(scale) if (0.0..=100.0).contains(&scale) && !scale.is_nan() => {
                     config.pid_pressure_scale = scale;
+                }
+                _ => {
+                    eprintln!(
+                        "[SNIPER] Warning: ignoring invalid SNIPER_PID_PRESSURE_SCALE={:?}; using default 0.2",
+                        val
+                    );
                 }
             }
         }

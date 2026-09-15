@@ -352,6 +352,11 @@ fn sniper_manifest(
         // Bottom-up processing assumes each op targets a distinct line range;
         // two ops with overlapping intervals would corrupt each other's output
         // through the shared lines Vec.
+        // Adjacent-pair checking after sort-by-desc-start is SUFFICIENT: if
+        // non-adjacent ops[i] and ops[i+2] overlap, the middle op's start
+        // lies between theirs, and a case analysis over insert/non-insert
+        // shapes (insert ops are zero-width at `start`) shows the middle op
+        // must overlap ops[i] or ops[i+2] — so one adjacent pair always fires.
         for i in 1..ops.len() {
             if manifest_ops_overlap(&ops[i], &ops[i - 1]) {
                 return Err(format!(
@@ -511,6 +516,13 @@ fn sniper_manifest(
 #[pyfunction]
 fn sniper_undo(py: Python<'_>, filepath: &str) -> PyResult<PyObject> {
     let config = SniperConfig::from_env();
+    // Normalize before lock/backup ops — parity with sniper_edit (line 98)
+    // and sniper_manifest (line 322): a raw path (~ or symlink) would
+    // otherwise look up .sniper/ backups in the wrong directory.
+    let filepath = normalize_path(filepath).map_err(PyValueError::new_err)?;
+    let filepath = filepath
+        .to_str()
+        .ok_or_else(|| PyValueError::new_err("resolved path is not valid UTF-8"))?;
     let _lock = SniperLock::acquire_with_config(filepath, &config)
         .map_err(|e| PyRuntimeError::new_err(format!("lock acquire: {e}")))?;
 
@@ -782,7 +794,7 @@ fn recommend_from_risk_py() -> String {
 /// Args:
 ///     filepath (str): Path to the target file.
 ///     content (str): Content to write.
-///     dal_level (str): DAL level ("minimum", "moderate", "maximum").
+///     dal_level (str): DAL level ("BASELINE", "ENHANCED", "MAXIMUM", case-insensitive).
 ///
 /// Returns:
 ///     dict: Result with keys:

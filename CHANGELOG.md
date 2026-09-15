@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Silent PID scale rejection:** Invalid `SNIPER_PID_ENTROPY_SCALE` / `SNIPER_PID_PRESSURE_SCALE` values (unparsable, out of range, NaN) now emit a stderr warning naming the offending value and the retained default instead of falling back silently.
+- **Python `sniper_undo` path parity:** `sniper_undo` now normalizes its path argument before lock/backup operations, matching `sniper_edit` and `sniper_manifest` — undo via a symlink or uncanonicalized path resolves backups in the correct file-relative `.sniper/` directory.
+- **Python DAL docstring:** Corrected the `dal_level` documented values to the actual contract (`BASELINE` / `ENHANCED` / `MAXIMUM`, case-insensitive).
+
+### Changed
+- **Rust/Python range-bounds parity probes:** Corrected two stale probe comments in `src/main.rs` that claimed Python bounds checks diverged from Rust; both layers use the identical check, so `(1,0)` inserts and end-bound rejection behave the same.
+- **Manifest overlap proof:** Documented the adjacent-pair sufficiency proof for manifest range-overlap detection in `sniper-py`.
+
+### Added
+- **API documentation coverage:** Module docstrings for `help_text`, library root, and benchmarks; function docstrings for context-hash verification; full type-stub docstrings for all Python bindings.
+
 ## [0.7.13] - 2026-07-27
 
 ### Fixed

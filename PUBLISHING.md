@@ -1,6 +1,6 @@
 # Publishing moesniper — Success Log & Reference
 
-> This document records the release procedure for PyPI, TestPyPI, crates.io, and GitHub Releases. The last published release is v0.7.12.
+> This document records the release procedure for PyPI, TestPyPI, crates.io, and GitHub Releases. The last published release is v0.7.13.
 
 ---
 
@@ -8,9 +8,9 @@
 
 | Registry | Package | Version | Status |
 |----------|---------|---------|--------|
-| **PyPI** | `moesniper` | 0.7.12 | ✅ Published |
-| **crates.io** | `moesniper` | 0.7.12 | ✅ Published |
-| **GitHub Release** | `moesniper` | v0.7.12 | ✅ Created |
+| **PyPI** | `moesniper` | 0.7.13 | ✅ Published |
+| **crates.io** | `moesniper` | 0.7.13 | ✅ Published |
+| **GitHub Release** | `moesniper` | v0.7.13 | ✅ Created |
 
 Linux wheels use the CPython 3.10 stable ABI (`cp310-abi3`) and target x86_64 and aarch64.
 
@@ -169,4 +169,4 @@ gh release create vX.Y.Z --generate-notes
 
 ---
 
-*Last successful release: v0.7.12 (2026-06-19)*
+*Last successful release: v0.7.13 (2026-07-27)*

@@ -2,6 +2,11 @@
 #![deny(clippy::expect_used)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+//! Precision file editor for LLM agents.
+//!
+//! Hex-encoded content operations, line-range splicing, atomic writes,
+//! undo via timestamped backups, and path security validation.
+
 /// Library version string (matches Cargo.toml).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -750,6 +755,11 @@ pub fn compute_context_hash(lines: &[String], start: usize, end: usize) -> Strin
     hex_encode(&hash)
 }
 
+/// Compares the first 16 hex characters (64 bits) of the SHA-256 context hash
+/// of lines surrounding an edit region against an expected short hash.
+/// Returns Ok(()) if they match, Err with a context mismatch message otherwise.
+/// Used to verify that content around an edit region has not been modified
+/// between the pre-edit and post-edit hash capture.
 pub fn verify_context(
     lines: &[String],
     start: usize,

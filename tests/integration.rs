@@ -1,3 +1,7 @@
+//! Integration tests for the sniper CLI binary.
+//! Covers atomic write, auto-indent, undo stack, path normalization, encode,
+//! splicing boundaries, Unicode payloads, and concurrent locking.
+
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
